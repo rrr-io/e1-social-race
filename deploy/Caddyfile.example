@@ -1,0 +1,7 @@
+# Proposed hostname: change it and PUBLIC_ORIGIN together if needed.
+# Append this block to /srv/caddy/Caddyfile; preserve all existing sites.
+# The existing caddy container must be attached to the external web network.
+social-pulse.rrriooo.com {
+    encode zstd gzip
+    reverse_proxy e1-social-pulse:8000
+}

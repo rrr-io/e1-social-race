@@ -1,0 +1,89 @@
+name: Deploy Social Pulse
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-social-pulse
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test application
+        run: |
+          set -eu
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests -v
+          python -m compileall -q app.py collectors.py storage.py
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          test -n "$SSH_KEY" && test -n "$SSH_HOST" && test -n "$SSH_USER"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if test -n "$SSH_KNOWN_HOSTS"; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            # Same first-use discovery as the existing rrr-io workflows.
+            # Set SSH_KNOWN_HOSTS to a verified host-key line to pin server identity.
+            ssh-keyscan -T 10 -H "$SSH_HOST" > ~/.ssh/known_hosts
+          fi
+          test -s ~/.ssh/known_hosts
+          printf 'Host *\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' > ~/.ssh/config
+      - name: Check server configuration
+        run: |
+          ssh "$TARGET" 'bash -se' <<'REMOTE'
+          set -eu
+          test -d /opt/social-pulse || { echo 'Create /opt/social-pulse first; see deploy/README.md'; exit 1; }
+          test -w /opt/social-pulse
+          test -s /opt/social-pulse/.env || { echo 'Create /opt/social-pulse/.env first; see deploy/README.md'; exit 1; }
+          test -d /opt/social-pulse/secrets || { echo 'Create /opt/social-pulse/secrets first'; exit 1; }
+          docker compose version
+          docker network inspect web >/dev/null
+          REMOTE
+      - name: Package application
+        run: |
+          set -eu
+          # Explicit files only: no local environment, cookies, database or Git history.
+          tar -czf /tmp/social-pulse-release.tgz \
+            --exclude='__pycache__' --exclude='*.pyc' \
+            app.py collectors.py storage.py requirements.txt \
+            Dockerfile .dockerignore static \
+            deploy/compose.production.yaml deploy/healthcheck.py deploy/Dockerfile
+      - name: Upload and restart
+        run: |
+          set -eu
+          scp /tmp/social-pulse-release.tgz "$TARGET:/opt/social-pulse/release.next.tgz"
+          ssh "$TARGET" 'bash -se' <<'REMOTE'
+          set -eu
+          cd /opt/social-pulse
+          chmod 600 .env
+          tar -xzf release.next.tgz
+          rm release.next.tgz
+          docker compose --env-file .env -f deploy/compose.production.yaml \
+            up -d --build --force-recreate --wait --wait-timeout 180
+          docker compose --env-file .env -f deploy/compose.production.yaml ps
+          REMOTE
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f ~/.ssh/id_deploy /tmp/social-pulse-release.tgz

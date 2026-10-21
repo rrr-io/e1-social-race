@@ -1,0 +1,38 @@
+name: social-pulse-production
+services:
+  social-pulse:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file: ../.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: '8000'
+      DATABASE_PATH: /app/data/pulse.sqlite3
+    volumes:
+      - pulse-data:/app/data
+      - type: bind
+        source: ../secrets
+        target: /run/pulse-secrets
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      web:
+        aliases: [e1-social-pulse]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, python, /app/deploy/healthcheck.py]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+volumes:
+  pulse-data:
+networks:
+  web:
+    external: true

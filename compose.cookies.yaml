@@ -1,0 +1,10 @@
+# Optional override. The source file must exist on the Docker host.
+services:
+  social-pulse:
+    environment:
+      TIKTOK_COOKIES_FILE: /run/secrets/tiktok_cookies
+    secrets:
+      - tiktok_cookies
+secrets:
+  tiktok_cookies:
+    file: ${TIKTOK_COOKIES_HOST_PATH:?Set TIKTOK_COOKIES_HOST_PATH to an absolute cookie-file path outside the repository}

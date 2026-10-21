@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/
+
+# Local session secrets must never enter Git or Docker images.
+secrets/
+*cookies*.txt
+.idea
