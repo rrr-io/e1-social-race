@@ -1,0 +1,11 @@
+# Optional override. The source file must exist on the Docker host.
+# Combine freely with compose.cookies.yaml (TikTok): use either or both -f flags.
+services:
+  social-pulse:
+    environment:
+      INSTAGRAM_COOKIES_FILE: /run/secrets/instagram_cookies
+    secrets:
+      - instagram_cookies
+secrets:
+  instagram_cookies:
+    file: ${INSTAGRAM_COOKIES_HOST_PATH:?Set INSTAGRAM_COOKIES_HOST_PATH to an absolute cookie-file path outside the repository}
