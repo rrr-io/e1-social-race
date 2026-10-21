@@ -2,7 +2,7 @@
 
 Self-hosted monitoring for public TikTok, Instagram and YouTube post metrics. Python backend, plain HTML/CSS/JavaScript dashboard, SQLite history and a background worker. No paid scraping service is required.
 
-**Collection is best-effort.** Platforms may hide metrics, require sign-in or block server access. An authenticated session can help with sign-in requirements, but cannot guarantee collection. An optional TikTok cookie file provides session authentication. The application does not log in with a username/password or solve CAPTCHA.
+**Collection is best-effort.** Platforms may hide metrics, require sign-in or block server access. An authenticated session can help with sign-in requirements and anonymous rate limits, but cannot guarantee collection. Optional TikTok and Instagram cookie files provide session authentication. The application does not log in with a username/password or solve CAPTCHA.
 
 ## Choose your setup
 
@@ -45,39 +45,40 @@ docker compose up -d --build
 
 Do not run `docker compose down -v`: it deletes the database volume. If session cookies are not configured, collection continues anonymously.
 
-## TikTok: authenticated session for local Docker (optional)
+## TikTok / Instagram: authenticated session for local Docker (optional)
 
-For the production server, use the [production cookie setup](deploy/README.md#3-optional-tiktok-cookies). The steps below use `compose.yaml` and `compose.cookies.yaml`.
+For the production server, use the [production cookie setup](deploy/README.md#3-optional-tiktok--instagram-cookies). The steps below use `compose.yaml` plus `compose.cookies.yaml` (TikTok) and/or `compose.cookies.instagram.yaml` (Instagram); use either override on its own or both together.
 
-**Do not put an account password or session cookies in the repository, even a private one.** The application does not accept TikTok username/password variables. Cookies are credentials and belong in a private server-side file. Do not paste them into issues, logs or chats.
+**Do not put an account password or session cookies in the repository, even a private one.** The application does not accept TikTok or Instagram username/password variables. Cookies are credentials and belong in a private server-side file. Do not paste them into issues, logs or chats. For Instagram, prefer a secondary account used only for this: repeated anonymous-looking requests from an authenticated account can still get that account flagged or rate-limited.
 
-1. Sign into your TikTok account in a browser on your computer and confirm the target public video opens normally.
+1. Sign into your TikTok and/or Instagram account in a browser on your computer and confirm the target public post opens normally.
 2. Export the session cookies in Mozilla/Netscape format. Use a trusted export method; yt-dlp supports browser-cookie export. A fresh browser profile used only for this account avoids exporting unrelated browsing sessions.
-3. Transfer the cookie file privately to the Docker host, outside the repository, for example `/srv/e1-pulse-secrets/tiktok.cookies.txt`.
-4. Restrict access to the file. The container runs as UID `10001`, which must be able to read it. With standard rootful Docker on Linux, for example:
+3. Transfer the cookie file(s) privately to the Docker host, outside the repository, for example `/srv/e1-pulse-secrets/tiktok.cookies.txt` and/or `/srv/e1-pulse-secrets/instagram.cookies.txt`.
+4. Restrict access to the file(s). The container runs as UID `10001`, which must be able to read them. With standard rootful Docker on Linux, for example:
 
 ```bash
-sudo chown 10001:10001 /srv/e1-pulse-secrets/tiktok.cookies.txt
-sudo chmod 600 /srv/e1-pulse-secrets/tiktok.cookies.txt
+sudo chown 10001:10001 /srv/e1-pulse-secrets/tiktok.cookies.txt /srv/e1-pulse-secrets/instagram.cookies.txt
+sudo chmod 600 /srv/e1-pulse-secrets/tiktok.cookies.txt /srv/e1-pulse-secrets/instagram.cookies.txt
 ```
 
-Rootless Docker/user namespaces may require different host ownership. Do not make the file world-readable to fix permissions.
+Rootless Docker/user namespaces may require different host ownership. Do not make the files world-readable to fix permissions.
 
-5. Set this path in `.env`:
+5. Set the matching path(s) in `.env`:
 
 ```dotenv
 TIKTOK_COOKIES_HOST_PATH=/srv/e1-pulse-secrets/tiktok.cookies.txt
+INSTAGRAM_COOKIES_HOST_PATH=/srv/e1-pulse-secrets/instagram.cookies.txt
 ```
 
-6. Start with the optional Compose override:
+6. Start with the optional Compose override(s), combining only the ones you configured:
 
 ```bash
-docker compose -f compose.yaml -f compose.cookies.yaml up -d --build
+docker compose -f compose.yaml -f compose.cookies.yaml -f compose.cookies.instagram.yaml up -d --build
 ```
 
-Use both `-f` options for subsequent Compose updates while using cookies. The override mounts the cookie file as a read-only secret and sets `TIKTOK_COOKIES_FILE` inside the container. The collector copies only TikTok-domain entries to a private temporary cookie jar, lets yt-dlp use that copy, and removes it after each attempt. The original secret is never modified or included in the Docker image. Cookie updates from the extractor are not persisted: export a fresh session if it expires. After replacing the host file, recreate the container to ensure the new mount is picked up.
+Use the same `-f` combination for subsequent Compose updates while using cookies. Each override mounts its cookie file as a read-only secret and sets `TIKTOK_COOKIES_FILE` / `INSTAGRAM_COOKIES_FILE` inside the container. The collector copies only that platform's domain entries to a private temporary cookie jar, lets yt-dlp use that copy, and removes it after each attempt. The original secret is never modified or included in the Docker image. Cookie updates from the extractor are not persisted: export a fresh session if it expires. After replacing a host file, recreate the container to ensure the new mount is picked up.
 
-For direct Python execution, set `TIKTOK_COOKIES_FILE` to your private local file instead. `TIKTOK_COOKIES_HOST_PATH` is only used by the local Compose override. Production sets `TIKTOK_COOKIES_FILE` to the mounted path described in the deployment guide.
+For direct Python execution, set `TIKTOK_COOKIES_FILE` / `INSTAGRAM_COOKIES_FILE` to your private local file instead. The `*_HOST_PATH` variables are only used by the local Compose overrides. Production sets the `*_COOKIES_FILE` variables to the mounted paths described in the deployment guide.
 
 ### Exporting with yt-dlp
 
@@ -85,11 +86,12 @@ On the computer where you signed in, using a dedicated Firefox profile, you can 
 
 ```bash
 python -m yt_dlp --cookies-from-browser firefox --cookies /absolute/private/path/tiktok.cookies.txt --skip-download -- "https://www.tiktok.com/@username/video/VIDEO_ID"
+python -m yt_dlp --cookies-from-browser firefox --cookies /absolute/private/path/instagram.cookies.txt --skip-download -- "https://www.instagram.com/reel/CODE/"
 ```
 
-Replace the example URL with the actual public video. For a specific profile, use `firefox:PROFILE_PATH`. The export may contain all cookies from the selected browser profile, so treat the entire exported file as a secret. Only TikTok-domain entries are forwarded by this application. See the official [yt-dlp cookie FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp).
+Replace the example URLs with the actual public posts. For a specific profile, use `firefox:PROFILE_PATH`. The export may contain all cookies from the selected browser profile, so treat the entire exported file as a secret. Only that platform's domain entries are forwarded by this application. See the official [yt-dlp cookie FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp).
 
-A new account is not necessarily required. Cookies may help if sign-in is the problem; they may not fix expired sessions, rate limits, server-IP restrictions, bot challenges or changes to the extractor. Troubleshooting requires the original extractor error. Local tests do not establish that authenticated TikTok collection will work from your server.
+A new account is not necessarily required. Cookies may help if sign-in or an anonymous rate limit is the problem; they may not fix expired sessions, server-IP restrictions, bot challenges or changes to the extractor. Troubleshooting requires the original extractor error. Local tests do not establish that authenticated TikTok or Instagram collection will work from your server.
 
 ## Features
 
@@ -108,7 +110,7 @@ No historical reconstruction before you added a link, challenge leaderboard, dea
 | --- | --- | --- |
 | YouTube | `/watch?v=ID`, `youtu.be/ID`, `/shorts/ID`, `/live/ID` | Official API when configured, otherwise yt-dlp. Some counts may be unavailable. |
 | TikTok | `https://www.tiktok.com/@username/video/ID` | yt-dlp, anonymous or with the optional cookie file. Open short links in a browser and copy the full address first. Photo posts are unsupported. |
-| Instagram | `/reel/CODE/`, `/reels/CODE/`, `/p/CODE/`, `/tv/CODE/` | Anonymous yt-dlp extraction, primarily videos/Reels. Photos and carousels are not guaranteed. Carousel metrics are never summed across entries. |
+| Instagram | `/reel/CODE/`, `/reels/CODE/`, `/p/CODE/`, `/tv/CODE/` | yt-dlp, anonymous or with the optional cookie file, primarily videos/Reels. Photos and carousels are not guaranteed. Carousel metrics are never summed across entries. |
 
 Reading a post manually does not guarantee a server can extract it. No OCR is used; counts come from structured metadata, not rounded visual labels such as “1.2K”.
 
@@ -140,8 +142,10 @@ Public videos do not require creator authorization. The collector uses `videos.l
 | `POLL_INTERVAL_MINUTES` | `60` | Interval after a check, minimum 15 minutes |
 | `MAX_POSTS` | `100` | Maximum saved posts, including paused posts |
 | `YOUTUBE_API_KEY` | empty | Enable the official YouTube API |
-| `TIKTOK_COOKIES_HOST_PATH` | unset | Host file for the optional Compose secret |
-| `TIKTOK_COOKIES_FILE` | unset | Cookie-file path inside the running application |
+| `TIKTOK_COOKIES_HOST_PATH` | unset | Host file for the optional Compose secret (TikTok) |
+| `TIKTOK_COOKIES_FILE` | unset | Cookie-file path inside the running application (TikTok) |
+| `INSTAGRAM_COOKIES_HOST_PATH` | unset | Host file for the optional Compose secret (Instagram) |
+| `INSTAGRAM_COOKIES_FILE` | unset | Cookie-file path inside the running application (Instagram) |
 | `DATABASE_PATH` | `data/pulse.sqlite3` | SQLite location; normally leave unchanged |
 
 A single worker processes one post at a time, with a 90-second timeout and a 10-second gap between attempts. Queues can delay scheduled checks. Manual refresh has a 5-minute cooldown. Consecutive errors increase the retry interval up to 24 hours; a successful collection restores the normal interval. Sampling is not guaranteed at exact or identical times across posts.
@@ -175,7 +179,7 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-If you use cookies, include `-f compose.yaml -f compose.cookies.yaml` in both commands. Without Docker: `pip install -U yt-dlp`. Check the installed version with `docker compose exec social-pulse python -m yt_dlp --version`.
+If you use cookies, include the same `-f` flags you used to start the stack (e.g. `-f compose.yaml -f compose.cookies.yaml -f compose.cookies.instagram.yaml`) in both commands. Without Docker: `pip install -U yt-dlp`. Check the installed version with `docker compose exec social-pulse python -m yt_dlp --version`.
 
 Create a consistent backup while the server runs:
 
@@ -189,7 +193,7 @@ History has no automatic retention limit. Deleting a post also deletes all its s
 ## Project structure and validation
 
 - `app.py`: authenticated HTTP endpoints and worker.
-- `collectors.py`: URL validation, YouTube API, yt-dlp and optional TikTok cookies.
+- `collectors.py`: URL validation, YouTube API, yt-dlp and optional TikTok/Instagram cookies.
 - `storage.py`: SQLite, snapshots, scheduling and legacy error translation.
 - `deploy/`: production Docker configuration, health check and server setup instructions.
 - `.github/workflows/deploy.yml`: tests and SSH deployment on pushes to `main`.

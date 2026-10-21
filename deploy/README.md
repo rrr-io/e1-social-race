@@ -66,6 +66,7 @@ POLL_INTERVAL_MINUTES=60
 MAX_POSTS=100
 YOUTUBE_API_KEY=
 TIKTOK_COOKIES_FILE=
+INSTAGRAM_COOKIES_FILE=
 ```
 
 The example hostname is `social-pulse.rrriooo.com`; configure its DNS record before using it.
@@ -73,17 +74,20 @@ Change it here and in the Caddy block if you want another hostname. Use a
 password of at least 12 characters; generating a hex password avoids dotenv
 interpolation issues. Keep the password private.
 
-The `secrets/` directory stores an optional TikTok session file. It is unrelated
-to GitHub Actions secrets. The production Compose configuration mounts this
-directory unconditionally, so create it even if it will remain empty.
+The `secrets/` directory stores optional TikTok/Instagram session files. It is
+unrelated to GitHub Actions secrets. The production Compose configuration
+mounts this directory unconditionally, so create it even if it will remain
+empty.
 
-## 3. Optional TikTok cookies
+## 3. Optional TikTok / Instagram cookies
 
 For the first infrastructure deployment you can leave `TIKTOK_COOKIES_FILE`
-empty. To use cookies, privately transfer a fresh Netscape export to:
+and `INSTAGRAM_COOKIES_FILE` empty. To use cookies, privately transfer a fresh
+Netscape export to:
 
 ```text
 /opt/social-pulse/secrets/tiktok.cookies.txt
+/opt/social-pulse/secrets/instagram.cookies.txt
 ```
 
 For example, from your Mac (replace SERVER_IP):
@@ -91,25 +95,40 @@ For example, from your Mac (replace SERVER_IP):
 ```bash
 scp "$HOME/Downloads/www.tiktok.com_cookies.txt" \
   ubuntu@SERVER_IP:/opt/social-pulse/secrets/tiktok.cookies.txt
+scp "$HOME/Downloads/www.instagram.com_cookies.txt" \
+  ubuntu@SERVER_IP:/opt/social-pulse/secrets/instagram.cookies.txt
 ```
 
 On the server with standard rootful Docker:
 
 ```bash
-sudo chown 10001:10001 /opt/social-pulse/secrets/tiktok.cookies.txt
-sudo chmod 600 /opt/social-pulse/secrets/tiktok.cookies.txt
+sudo chown 10001:10001 /opt/social-pulse/secrets/tiktok.cookies.txt /opt/social-pulse/secrets/instagram.cookies.txt
+sudo chmod 600 /opt/social-pulse/secrets/tiktok.cookies.txt /opt/social-pulse/secrets/instagram.cookies.txt
 ```
 
-Set in the server `.env`:
+Set the matching path(s) in the server `.env`:
 
 ```dotenv
 TIKTOK_COOKIES_FILE=/run/pulse-secrets/tiktok.cookies.txt
+INSTAGRAM_COOKIES_FILE=/run/pulse-secrets/instagram.cookies.txt
 ```
 
 Production mounts the secret directory directly. Do not use the Mac path or
-`TIKTOK_COOKIES_HOST_PATH` here; those belong to the local Compose override.
-Do not include cookie contents in Git, logs or messages. Session changes and
-platform blocks may still prevent collection after successful deployment.
+the `*_COOKIES_HOST_PATH` variables here; those belong to the local Compose
+overrides. Do not include cookie contents in Git, logs or messages. Session
+changes and platform blocks may still prevent collection after successful
+deployment. For Instagram, prefer a secondary account for this: repeated
+automated requests from an authenticated account can get that account
+flagged or rate-limited too.
+
+After adding or replacing a cookie file, recreate the container so it is
+picked up (no code change is required, since the production Compose file
+already mounts the whole `secrets/` directory):
+
+```bash
+cd /opt/social-pulse
+docker compose --env-file .env -f deploy/compose.production.yaml up -d --force-recreate --wait
+```
 
 ## 4. Commit and push from your Mac
 

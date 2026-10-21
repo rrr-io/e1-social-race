@@ -91,13 +91,28 @@ def youtube_api(target):
 
 
 
+# Platform -> (env var holding the private cookie-file path, cookie domains to keep).
+# A browser export may contain cookies for unrelated sites; only these are forwarded.
+PLATFORM_COOKIE_ENV = {
+    'tiktok': 'TIKTOK_COOKIES_FILE',
+    'instagram': 'INSTAGRAM_COOKIES_FILE',
+}
+PLATFORM_COOKIE_DOMAINS = {
+    'tiktok': ('tiktok.com',),
+    'instagram': ('instagram.com',),
+}
+
+
 @contextmanager
-def tiktok_cookie_copy(target):
+def platform_cookie_copy(target):
     """Use a private writable copy: yt-dlp writes its cookie jar on exit."""
-    configured = os.getenv('TIKTOK_COOKIES_FILE', '').strip() if target.platform == 'tiktok' else ''
+    env_var = PLATFORM_COOKIE_ENV.get(target.platform)
+    configured = os.getenv(env_var, '').strip() if env_var else ''
     if not configured:
         yield None
         return
+    domains = PLATFORM_COOKIE_DOMAINS[target.platform]
+    label = target.platform.capitalize()
     try:
         original = Path(configured)
         if not original.is_file() or original.stat().st_size > 2_000_000:
@@ -105,7 +120,7 @@ def tiktok_cookie_copy(target):
         content = original.read_text(encoding='utf-8')
         if not content.startswith(('# Netscape HTTP Cookie File', '# HTTP Cookie File')):
             raise ValueError('Invalid cookie format')
-        # Keep only TikTok domains, even if a browser export contains other sites.
+        # Keep only this platform's domains, even if a browser export contains other sites.
         lines = ['# Netscape HTTP Cookie File']
         for line in content.splitlines():
             if not line or (line.startswith('#') and not line.startswith('#HttpOnly_')):
@@ -114,12 +129,12 @@ def tiktok_cookie_copy(target):
             if len(fields) != 7:
                 continue
             domain = fields[0].removeprefix('#HttpOnly_').lstrip('.').lower()
-            if domain == 'tiktok.com' or domain.endswith('.tiktok.com'):
+            if any(domain == d or domain.endswith('.' + d) for d in domains):
                 lines.append(line)
         if len(lines) == 1:
-            raise ValueError('No TikTok cookies')
+            raise ValueError(f'No {label} cookies')
     except (OSError, UnicodeError, ValueError) as exc:
-        raise CollectionError('TikTok cookies could not be loaded. Check the file permissions and Netscape format; export a signed-in TikTok session again.') from exc
+        raise CollectionError(f'{label} cookies could not be loaded. Check the file permissions and Netscape format; export a signed-in {label} session again.') from exc
     with tempfile.TemporaryDirectory(prefix='pulse-session-') as directory:
         copied = Path(directory) / 'cookies.txt'
         copied.touch(mode=0o600)
@@ -136,7 +151,7 @@ def collect(target):
                '--socket-timeout', '20', '--retries', '0', '--extractor-retries', '0',
                '--no-check-formats']
     try:
-        with tiktok_cookie_copy(target) as cookies:
+        with platform_cookie_copy(target) as cookies:
             if cookies:
                 command.extend(['--cookies', cookies])
             command.extend(['--', target.url])
@@ -154,7 +169,7 @@ def collect(target):
         if '403' in detail or 'forbidden' in detail:
             raise CollectionError('The platform denied access (HTTP 403). This does not confirm that sign-in is the cause. No metrics were updated.')
         if any(x in detail for x in ('login', 'sign in', 'log in', 'cookies')):
-            raise CollectionError('The extractor reported a sign-in or session requirement. For TikTok, configure or refresh TIKTOK_COOKIES_FILE. No metrics were updated.')
+            raise CollectionError('The extractor reported a sign-in or session requirement. For TikTok or Instagram, configure or refresh TIKTOK_COOKIES_FILE / INSTAGRAM_COOKIES_FILE. No metrics were updated.')
         raise CollectionError('Extraction failed: unavailable/unsupported post, network error or outdated extractor.')
     try:
         info = json.loads(result.stdout)
