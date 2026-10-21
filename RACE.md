@@ -2,9 +2,9 @@
 
 This extension preserves the existing collection tracker and SQLite database.
 
-- `/race`: public team/creator leaderboard and official posts. No login required.
-- `/race-admin`: authenticated race configuration and manual observations.
-- `/`: existing authenticated tracker, collection errors, pause and refresh controls.
+- `/`: public team/creator leaderboard and official posts. No login required.
+- `/admin#race`: authenticated race configuration and manual observations.
+- `/admin#monitoring`: original authenticated tracker, collection errors, pause and refresh controls.
 
 ## Confirmed mechanics
 
@@ -16,7 +16,7 @@ Each creator's score is the sum of their official posts' latest cumulative engag
 
 ## Setup
 
-1. Open `/race-admin` using the existing administrator credentials.
+1. Open `/admin#race` using the existing administrator credentials.
 2. Confirm the agreed integer weights for likes, comments and views. Zero excludes a metric. No formula is preselected; rankings remain unavailable until configured. Shares/reposts are not collected in this release. Weights are locked after the race begins once configured.
 3. Add teams and their representatives. Representative names are unique, case-insensitively; enter each person's identity consistently.
 4. Add the scheduled posting events and their KST publication windows.
@@ -57,3 +57,12 @@ node --check static/race.js
 ```
 
 Rollback: deploy the previous code after a database backup. The previous code ignores the extra tables, but it does not enforce race constraints or the race schedule. Do not administer official entries from the older version.
+
+## Two pages, one admin workspace
+
+- `https://e1-social-race.rrriooo.com/` is the public leaderboard.
+- `https://e1-social-race.rrriooo.com/admin` is the authenticated administration page.
+
+The admin page has two tabs: **Post monitoring** and **Race setup & results**. Hash links `/admin#monitoring` and `/admin#race` select a tab without loading a separate page. Both views use the same records. Registering an official post also adds it to monitoring; an existing URL is reused. Monitoring a standalone post alone does not enroll it in the competition. Manual race observations are shown in the race tab and audit; the tracker history shows automatic observations.
+
+Legacy `/race` and `/race-admin` links redirect to `/` and `/admin#race`. The health check verifies the authenticated `/admin` endpoint. API authorization is unchanged: only the leaderboard API is public. Use `PUBLIC_ORIGIN=https://e1-social-race.rrriooo.com` on the server, with no path.

@@ -83,3 +83,24 @@ class HTTP(unittest.TestCase):
         public = json.loads(self.request('/api/race', auth=False)[1])
         self.assertNotIn('audit', public)
         self.assertEqual(public['teams'][0]['representative'], 'Person')
+
+    def test_two_pages_and_legacy_redirects(self):
+        import http.client
+        public = self.request('/', auth=False)
+        self.assertEqual(public[0], 200)
+        self.assertNotIn(b'data-action="manual"', public[1])
+        self.assertEqual(self.request('/admin', auth=False)[0], 401)
+        status, body = self.request('/admin')
+        self.assertEqual(status, 200)
+        self.assertIn(b'id="monitoring-panel"', body)
+        self.assertIn(b'id="race-panel"', body)
+        self.assertIn(b'data-action="manual"', body)
+        self.assertEqual(self.request('/admin.js', auth=False)[0], 401)
+        for path, target in [('/race', '/'), ('/race-admin', '/admin#race')]:
+            connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port)
+            connection.request('GET', path)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 302)
+            self.assertEqual(response.getheader('Location'), target)
+            response.read()
+            connection.close()

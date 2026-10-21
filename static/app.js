@@ -1,3 +1,4 @@
+(() => {
 const $ = s => document.querySelector(s);
 const fmt = n => n == null ? '—' : new Intl.NumberFormat('en-GB').format(n);
 const date = n => n ? new Date(n * 1000).toLocaleString('en-GB') : '—';
@@ -38,13 +39,13 @@ async function reload() {
   $('#interval').textContent = `Every ${data.interval_minutes} minutes`;
   render();
 }
-function error(e) { $('#message').textContent = e.message; }
+function error(e) { $('#tracker-message').textContent = e.message; }
 $('#add-form').addEventListener('submit', async e => {
   e.preventDefault();
   const button = e.target.querySelector('button'); button.disabled = true;
   try {
     await api('/api/posts', Object.fromEntries(new FormData(e.target)));
-    e.target.reset(); $('#message').textContent = 'Post added. The first check is queued.'; await reload();
+    e.target.reset(); $('#tracker-message').textContent = 'Post added. The first check is queued.'; await reload();
   } catch(e) { error(e); } finally { button.disabled = false; }
 });
 $('#posts').addEventListener('click', async e => {
@@ -61,7 +62,7 @@ $('#posts').addEventListener('click', async e => {
     if (action === 'delete' && !confirm('Delete this post and its entire history?')) return;
     b.disabled = true;
     await api(`/api/posts/${id}/${action}`, {});
-    $('#message').textContent = action === 'refresh' ? 'Refresh queued.' : '';
+    $('#tracker-message').textContent = action === 'refresh' ? 'Refresh queued.' : '';
     await reload();
   } catch(e) { error(e); b.disabled = false; }
 });
@@ -70,3 +71,7 @@ $('#search').addEventListener('input', render);
 $('#platform').addEventListener('change', render);
 reload().catch(error);
 setInterval(() => reload().catch(error), 10000);
+
+document.addEventListener("race-saved", () => reload().catch(error));
+
+})();

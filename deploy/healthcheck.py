@@ -9,7 +9,7 @@ try:
         f"{os.getenv('ADMIN_USER', 'admin')}:{os.environ['ADMIN_PASSWORD']}".encode()
     ).decode()
     request = urllib.request.Request(
-        'http://127.0.0.1:8000/', headers={'Authorization': 'Basic ' + token}
+        'http://127.0.0.1:8000/admin', headers={'Authorization': 'Basic ' + token}
     )
     with urllib.request.urlopen(request, timeout=3) as response:
         healthy = response.status == 200

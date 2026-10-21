@@ -76,21 +76,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        redirects = {'/race': '/', '/race/': '/', '/race-admin': '/admin#race', '/race-admin/': '/admin#race', '/admin/': '/admin'}
+        if path in redirects:
+            return self.reply(302, '', extra={'Location': redirects[path]})
         if path == '/api/race':
             return self.reply(200, race.read())
-        if path in ('/race', '/race.js', '/race.css'):
-            filename, mime = {'/race': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css')}[path]
+        if path in ('/', '/race.js', '/race.css'):
+            filename, mime = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css')}[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
         if not self.authenticated():
             return
-        path = urlsplit(self.path).path
-        if path == '/race-admin':
-            return self.reply(200, (STATIC / 'race-admin.html').read_bytes(), 'text/html; charset=utf-8')
         if path == '/api/race/admin':
             return self.reply(200, race.read(admin=True))
-        if path in ('/', '/app.js', '/style.css'):
-            filename = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[path]
-            mime = {'/': 'text/html', '/app.js': 'application/javascript', '/style.css': 'text/css'}[path]
+        if path in ('/admin', '/app.js', '/style.css', '/admin.js', '/admin.css'):
+            filename, mime = {'/admin': ('index.html', 'text/html'), '/app.js': ('app.js', 'application/javascript'), '/style.css': ('style.css', 'text/css'), '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css')}[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
         if path == '/api/posts':
             return self.reply(200, {'posts': storage.rows(), 'interval_minutes': storage.INTERVAL // 60})

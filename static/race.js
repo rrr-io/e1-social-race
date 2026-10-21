@@ -1,3 +1,4 @@
+(() => {
 'use strict';
 const admin = document.body.dataset.admin === 'true';
 const $ = id => document.getElementById(id);
@@ -47,9 +48,11 @@ document.querySelectorAll('form[data-action]').forEach(form => form.addEventList
     if (form.dataset.action === 'manual') payload.final = form.elements.final.checked;
     const response = await fetch(`/api/race/${form.dataset.action}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Save failed.');
-    $('message').textContent = 'Saved successfully.'; await load();
+    $('message').textContent = 'Saved successfully.'; await load(); document.dispatchEvent(new Event('race-saved'));
   } catch (error) { $('message').textContent = error.message; }
   finally { button.disabled = false; }
 }));
 load().catch(error => { $('message').textContent = error.message; });
 if (!admin) setInterval(() => load().catch(() => { $('message').textContent = 'Refresh failed. Showing previously loaded data.'; }), 60000);
+
+})();
