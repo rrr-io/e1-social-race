@@ -1,15 +1,11 @@
 # Production deployment on rio-server
 
-This follows the public workflows inspected in `rrr-io/coven-gathering`,
-`rrr-io/my-race-engineer` and `rrr-io/e1-pixel-pit`:
-main push → tests → SSH upload → Docker Compose → existing Dockerized Caddy.
-The actual server configuration has not been inspected. The public
-`rrr-io/e1-social-race` repository was empty during this review.
+The deployment workflow uses the same architecture as the other rrr-io projects:
+push to `main` → tests → SSH upload → Docker Compose → Caddy.
 
-This patch only adds files. Apply it at the application root containing
-`app.py`, `Dockerfile`, `static/` and `tests/`. Do not apply it if a deploy
-workflow with the same path already exists without reviewing that workflow.
-It does not change local Docker configuration or upload secrets to GitHub.
+The source repository is `rrr-io/e1-social-race`. Run Git commands from the
+application root containing `app.py`, `Dockerfile`, `static/` and `tests/`.
+Local Docker configuration is separate from production configuration.
 
 ## 1. GitHub configuration
 
@@ -28,7 +24,7 @@ matching existing workflows; discovery alone does not independently verify
 server identity. Pin an entry verified against your trusted SSH connection.
 
 Runtime settings are stored in `/opt/social-pulse/.env` on the server. No
-additional GitHub password or cookie secret is required for this variant.
+additional GitHub password or cookie secret is required.
 
 ## 2. One-time server preparation
 
@@ -72,10 +68,14 @@ YOUTUBE_API_KEY=
 TIKTOK_COOKIES_FILE=
 ```
 
-The hostname is a proposal, not an existing DNS record verified by this patch.
+The example hostname is `social-pulse.rrriooo.com`; configure its DNS record before using it.
 Change it here and in the Caddy block if you want another hostname. Use a
 password of at least 12 characters; generating a hex password avoids dotenv
-interpolation issues. Do not use the password previously shared in chat.
+interpolation issues. Keep the password private.
+
+The `secrets/` directory stores an optional TikTok session file. It is unrelated
+to GitHub Actions secrets. The production Compose configuration mounts this
+directory unconditionally, so create it even if it will remain empty.
 
 ## 3. Optional TikTok cookies
 
@@ -111,21 +111,37 @@ Production mounts the secret directory directly. Do not use the Mac path or
 Do not include cookie contents in Git, logs or messages. Session changes and
 platform blocks may still prevent collection after successful deployment.
 
-## 4. Apply and push from your Mac
+## 4. Commit and push from your Mac
 
-Place the supplied patch outside the repository. From the application root:
+Configure the repository-local Git author before creating commits. Use an
+email verified by your GitHub account or its exact GitHub noreply address:
 
 ```bash
-git apply --check /path/to/social-pulse-deploy.patch
-git apply /path/to/social-pulse-deploy.patch
-git add .github/workflows/deploy.yml deploy
-git commit -m "Add SSH and Docker deployment for Social Pulse"
+git config --local user.name "rrr-io"
+git config --local user.email "YOUR_VERIFIED_GITHUB_EMAIL"
+git var GIT_AUTHOR_IDENT
+```
+
+If your SSH configuration defines `github-rio` for your personal GitHub key,
+use `git@github-rio:rrr-io/e1-social-race.git` as the remote URL. Check with
+`git remote -v`; use `git remote add origin` for a new remote or
+`git remote set-url origin` for an existing one. The SSH identity grants push
+access; the Git author email determines commit attribution.
+
+After preparing the server, review and push your changes:
+
+```bash
+git status --short
+git add .
+git diff --cached --name-only
+git commit -m "Update Social Pulse"
 git push origin main
 ```
 
-If the remote is still empty, commit the existing application source too,
-checking `git status` carefully. Never commit `.env`, cookies or local database
-files. Keep the source at the repository root rather than a nested folder.
+Before committing, confirm the staged files do not include `.env`, session
+cookies, private keys or databases. Keep the source at the repository root.
+Every push to `main` triggers deployment. You can also use **Run workflow**
+on the Actions page to redeploy the selected branch.
 
 Open GitHub → Actions → Deploy Social Pulse. The workflow installs Python,
 runs tests, packages application files, uploads to `/opt/social-pulse`, builds
@@ -170,8 +186,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://social-pulse.rrriooo.com/
 
 An unauthenticated GET should return 401. Open the URL and sign in. Test a
 real post and confirm a snapshot; a healthy deployment does not prove that
-TikTok/Instagram collection works. The known TikTok extraction problem still
-needs its original extractor error to diagnose.
+TikTok/Instagram collection works. If extraction fails, inspect the original
+extractor error without exposing cookie values or credentials.
 
 Future code deployments: push to main. Environment changes on the server:
 
@@ -188,7 +204,7 @@ explained in the application README. Automated rollback is not implemented;
 a failing healthcheck fails the workflow and needs investigation. Redeploy a
 known-good commit to recover from a code regression.
 
-## References inspected
+## Related deployment workflows
 
 - https://github.com/rrr-io/coven-gathering/blob/main/.github/workflows/deploy.yml
 - https://github.com/rrr-io/coven-gathering/blob/main/deploy/docker-compose.yml
