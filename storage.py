@@ -75,6 +75,8 @@ def init():
             source TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS snapshot_post_time ON snapshots(post_id,collected_at);
         ''')
+        import race
+        race.init(c)
         c.execute("UPDATE posts SET status='queued' WHERE status='collecting'")
         # Translate legacy database errors; new messages are already English.
         c.executemany(
@@ -119,3 +121,8 @@ def finish(post, data=None, error=None):
             status = 'ok' if all(data[k] is not None for k in ('views', 'likes', 'comments')) else 'partial'
             c.execute('UPDATE posts SET title=?,status=?,error=NULL,failures=0,next_check=? WHERE id=?',
                       (data['title'], status, now + INTERVAL, post['id']))
+
+        # Competition posts use the fixed KST observation schedule, including on failure.
+        if c.execute('SELECT 1 FROM race_entries WHERE post_id=?', (post['id'],)).fetchone():
+            import race
+            c.execute('UPDATE posts SET next_check=? WHERE id=?', (race.next_check(now), post['id']))

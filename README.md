@@ -214,3 +214,7 @@ The interface, application messages, comments and documentation are in English. 
 - https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
 - https://developers.google.com/youtube/v3/docs/videos
 - https://developers.google.com/youtube/v3/getting-started
+
+## Social Grid Race
+
+The competition extension adds `/race` (public standings) and `/race-admin` (authenticated administration). See [RACE.md](RACE.md) for setup, scoring, the KST schedule, manual evidence, finalization and deployment limitations. Facebook is excluded from this MVP.

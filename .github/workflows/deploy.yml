@@ -28,7 +28,7 @@ jobs:
           set -eu
           python -m pip install -r requirements.txt
           python -m unittest discover -s tests -v
-          python -m compileall -q app.py collectors.py storage.py
+          python -m compileall -q app.py collectors.py storage.py race.py
       - name: Set up SSH
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
@@ -67,7 +67,7 @@ jobs:
           # Explicit files only: no local environment, cookies, database or Git history.
           tar -czf /tmp/social-pulse-release.tgz \
             --exclude='__pycache__' --exclude='*.pyc' \
-            app.py collectors.py storage.py requirements.txt \
+            app.py collectors.py storage.py race.py requirements.txt \
             Dockerfile .dockerignore static \
             deploy/compose.production.yaml deploy/healthcheck.py deploy/Dockerfile
       - name: Upload and restart

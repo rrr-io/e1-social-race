@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import storage
+import race
 from collectors import CollectionError, Target, collect, normalize_url
 
 STATIC = Path(__file__).parent / 'static'
@@ -74,9 +75,19 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        path = urlsplit(self.path).path
+        if path == '/api/race':
+            return self.reply(200, race.read())
+        if path in ('/race', '/race.js', '/race.css'):
+            filename, mime = {'/race': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css')}[path]
+            return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
         if not self.authenticated():
             return
         path = urlsplit(self.path).path
+        if path == '/race-admin':
+            return self.reply(200, (STATIC / 'race-admin.html').read_bytes(), 'text/html; charset=utf-8')
+        if path == '/api/race/admin':
+            return self.reply(200, race.read(admin=True))
         if path in ('/', '/app.js', '/style.css'):
             filename = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[path]
             mime = {'/': 'text/html', '/app.js': 'application/javascript', '/style.css': 'text/css'}[path]
@@ -114,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError('Invalid JSON')
             path = urlsplit(self.path).path
+            if path.startswith('/api/race/'):
+                return self.reply(200, race.mutate(path.rsplit('/', 1)[1], payload, USERNAME, MAX_POSTS))
             if path == '/api/posts':
                 target = normalize_url(payload.get('url'))
                 label = payload.get('label', '')
@@ -136,6 +149,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.reply(404, {'error': 'Post not found'})
                     action = match[2]
                     if action == 'delete':
+                        if c.execute('SELECT 1 FROM race_entries WHERE post_id=?', (row['id'],)).fetchone():
+                            raise ValueError('Official race posts cannot be deleted; their history must be retained.')
                         c.execute('DELETE FROM posts WHERE id=?', (row['id'],))
                     elif action == 'pause':
                         c.execute('UPDATE posts SET paused=? WHERE id=?', (1 - row['paused'], row['id']))
@@ -146,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'ok': True})
             self.reply(404, {'error': 'Resource not found'})
         except sqlite3.IntegrityError:
-            self.reply(409, {'error': 'This post is already being tracked.'})
+            self.reply(409, {'error': 'Duplicate or invalid record. Each team has one representative and one post per platform per event.'})
         except (ValueError, TypeError) as exc:
             self.reply(400, {'error': str(exc)})
         except Exception:

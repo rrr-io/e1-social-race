@@ -71,3 +71,15 @@ class HTTP(unittest.TestCase):
         self.assertEqual(self.request(f'/api/posts/{pid}/delete', {})[0], 200)
         self.assertEqual(self.request(f'/api/posts/{pid}/history')[0], 404)
         self.assertEqual(storage.rows(), [])
+
+    def test_public_race_and_private_administration(self):
+        self.assertEqual(self.request('/race', auth=False)[0], 200)
+        self.assertEqual(self.request('/race.js', auth=False)[0], 200)
+        self.assertEqual(self.request('/race-admin', auth=False)[0], 401)
+        self.assertEqual(self.request('/api/race/admin', auth=False)[0], 401)
+        self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'}, auth=False)[0], 401)
+        self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'}, origin='https://evil.test')[0], 403)
+        self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'})[0], 200)
+        public = json.loads(self.request('/api/race', auth=False)[1])
+        self.assertNotIn('audit', public)
+        self.assertEqual(public['teams'][0]['representative'], 'Person')
