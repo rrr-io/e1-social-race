@@ -1,2 +1,2 @@
 # Update this package when platform extractors change; no other runtime dependency.
-yt-dlp>=2025.3.31
+yt-dlp[default,curl-cffi]>=2026.8.19
