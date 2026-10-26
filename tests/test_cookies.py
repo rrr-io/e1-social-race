@@ -98,3 +98,37 @@ class Cookies(unittest.TestCase):
             data = collectors.collect(collectors.normalize_url('https://www.instagram.com/p/ABCDE/'))
         self.assertIn('--ignore-no-formats-error', captured['command'])
         self.assertEqual((data['likes'], data['comments'], data['views']), (12, 3, None))
+
+    def _instagram_session(self, outcomes):
+        """Run collect() for Instagram with a cookie file; outcomes are (returncode, stdout, stderr) per call."""
+        calls = []
+        def fake_run(command, **kwargs):
+            calls.append('--cookies' in command)
+            code, out, err = outcomes[len(calls) - 1]
+            return subprocess.CompletedProcess(command, code, out, err)
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        source = Path(directory.name)/'session.txt'; source.write_text(INSTAGRAM_COOKIE)
+        with patch.dict(os.environ, {'INSTAGRAM_COOKIES_FILE': str(source)}), patch('collectors.subprocess.run', side_effect=fake_run), self.assertLogs(level='WARNING'):
+            try:
+                return collectors.collect(INSTAGRAM_TARGET), calls
+            except collectors.CollectionError as exc:
+                return exc, calls
+
+    EMPTY_JSON = 'ERROR: [Instagram] ABCDEFGHIJK: ABCDEFGHIJK: Failed to parse JSON (caused by JSONDecodeError("Expecting value in \'\': line 1 column 1 (char 0)"))'
+
+    def test_broken_instagram_session_falls_back_to_anonymous(self):
+        data, calls = self._instagram_session([(1, '', self.EMPTY_JSON), (0, '{"id": "ABCDEFGHIJK", "like_count": 5, "comment_count": 1}', '')])
+        self.assertEqual(calls, [True, False])
+        self.assertEqual((data['likes'], data['source']), (5, 'yt-dlp (no session)'))
+
+    def test_broken_session_and_failed_fallback_explain_the_session(self):
+        error, calls = self._instagram_session([(1, '', self.EMPTY_JSON), (1, '', 'ERROR: [Instagram] ABCDEFGHIJK: Instagram sent an empty media response. Check if this post is accessible in your browser without being logged-in.')])
+        self.assertEqual(calls, [True, False])
+        self.assertIn('saved Instagram session no longer works', str(error))
+        self.assertIn('anonymous visitor', str(error))
+
+    def test_empty_json_without_session_is_a_temporary_block(self):
+        with patch.dict(os.environ, {'INSTAGRAM_COOKIES_FILE': ''}), patch('collectors.subprocess.run', return_value=subprocess.CompletedProcess([], 1, '', self.EMPTY_JSON)), self.assertLogs(level='WARNING'):
+            with self.assertRaises(collectors.CollectionError) as result:
+                collectors.collect(INSTAGRAM_TARGET)
+        self.assertIn('empty or non-JSON response', str(result.exception))

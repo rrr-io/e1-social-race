@@ -1,4 +1,8 @@
 /* Admin workspace. Tokens and shared components live in common.css. */
+/* Neutral palette: the E1/team colours belong to the public page only. */
+body[data-admin]{--accent:#e9e9ee;--accent-ink:#121216;--accent-soft:#25252c}
+body[data-admin] a:not(.brand):not(.public-link){text-underline-offset:3px}
+.workflow-note a,.section-note a,.checklist a,.registration-card>a,.empty-panel a{text-decoration:underline;text-decoration-color:var(--line-strong)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);min-height:100vh}
 a{color:inherit}
@@ -27,7 +31,7 @@ form{background:var(--surface);border:1px solid var(--line);border-radius:var(--
 label{display:block;margin:0 0 16px;font-size:13px;font-weight:600;color:var(--muted)}
 input,select,textarea{display:block;width:100%;margin-top:6px;font:inherit;font-size:15px;color:var(--text);background:var(--bg);border:1px solid var(--line-strong);border-radius:10px;padding:0 12px;min-height:var(--tap);min-width:0}
 textarea{padding:10px 12px;min-height:90px;resize:vertical}
-input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px #ff7a1a33}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 input:user-invalid,select:user-invalid,textarea:user-invalid{border-color:var(--err)}
 input[type="datetime-local"]{color-scheme:dark}
 input[type="checkbox"]{width:20px;height:20px;min-height:0;margin:0;accent-color:var(--accent);flex:none}

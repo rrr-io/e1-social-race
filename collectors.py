@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -149,8 +149,9 @@ def extractor_reason(stderr):
     if not lines:
         return ''
     text = re.sub(r'\x1b\[[0-9;]*m', '', lines[-1])
-    text = re.sub(r'^ERROR:\s*(\[[^\]]+\]\s*)?([\w.-]+:\s+)?', '', text)
+    text = re.sub(r'^ERROR:\s*(\[[^\]]+\]\s*)?([\w.-]+:\s+)*', '', text)
     text = re.split(r'(?i)[;,.]?\s*(please report this issue|use --cookies|see\s+https?://)', text)[0]
+    text = re.sub(r'\s*\(caused by .*$', '', text)
     text = re.sub(r'https?://\S+', '[link]', text)
     text = re.sub(r'\s+', ' ', text).strip(' .;,')
     return text[:180]
@@ -184,28 +185,59 @@ def classify_failure(target, stderr, reason):
         return f'{label} requires a signed-in session for this post: {hint}. No metrics were updated.'
     if any(x in detail for x in ('timed out', 'name resolution', 'connection reset', 'connection refused', 'network is unreachable', 'urlopen error', 'remote end closed', 'ssl')):
         return f'Network error while contacting {label}. A retry has been scheduled.{said}'
+    if 'failed to parse json' in detail:
+        return (f'{label} answered with an empty or non-JSON response, usually a temporary block or rate limit for the server. '
+                f'The next scheduled check will try again.{said}')
     if any(x in detail for x in ('unable to extract', 'unexpected response', 'universal data', 'unsupported url')):
         return (f'{label} returned a page the extractor could not read. This usually means yt-dlp needs updating (redeploy to rebuild the image) '
                 f'or {label} served a temporary block page.{said}')
     return f'Extraction failed for an unrecognised reason.{said or " Check the server logs."}'
 
 
-def collect(target):
-    if target.platform == 'youtube' and os.environ.get('YOUTUBE_API_KEY'):
-        return youtube_api(target)
+def session_failure(target, stderr):
+    """The signed-in request failed in a way that points at the saved session, not at the post."""
+    detail = (stderr or '').lower()
+    return target.platform == 'instagram' and (
+        'failed to parse json' in detail or 'cookies are no longer valid' in detail or 'checkpoint' in detail or 'challenge_required' in detail)
+
+
+def run_ytdlp(target, use_cookies=True):
     # A separate process guarantees a hard timeout even if an extractor stalls.
     command = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--dump-single-json',
                '--skip-download', '--no-playlist', '--no-warnings', '--no-progress',
                '--socket-timeout', '20', '--retries', '0', '--extractor-retries', '0',
                '--no-check-formats', '--ignore-no-formats-error']
     try:
-        with platform_cookie_copy(target) as cookies:
+        with platform_cookie_copy(target) if use_cookies else nullcontext() as cookies:
             if cookies:
                 command.extend(['--cookies', cookies])
             command.extend(['--', target.url])
-            result = subprocess.run(command, capture_output=True, text=True, timeout=90)
+            return subprocess.run(command, capture_output=True, text=True, timeout=90), bool(cookies)
     except subprocess.TimeoutExpired as exc:
         raise CollectionError('Platform timed out after 90 seconds. A retry has been scheduled.') from exc
+
+
+def collect(target):
+    if target.platform == 'youtube' and os.environ.get('YOUTUBE_API_KEY'):
+        return youtube_api(target)
+    result, used_cookies = run_ytdlp(target)
+    source = 'yt-dlp'
+    if result.returncode and used_cookies and session_failure(target, result.stderr):
+        # Instagram's signed-in API answered with nothing (expired or flagged session).
+        # yt-dlp only falls back to the public page on a login redirect, so try it here.
+        logging.warning('Instagram session failed for %s (%s); retrying without cookies',
+                        target.remote_id, extractor_reason(result.stderr))
+        session_reason = extractor_reason(result.stderr)
+        result, _ = run_ytdlp(target, use_cookies=False)
+        source = 'yt-dlp (no session)'
+        if result.returncode:
+            reason = extractor_reason(result.stderr)
+            logging.warning('yt-dlp failed for %s %s without cookies: %s', target.platform, target.remote_id, reason)
+            raise CollectionError(
+                'The saved Instagram session no longer works: the signed-in API returned an empty response'
+                f'{f" ({session_reason})" if session_reason else ""}. Open Instagram with that account in a browser, '
+                'clear any security check, then export fresh cookies to INSTAGRAM_COOKIES_FILE. '
+                f'The anonymous retry also failed: {classify_failure(target, result.stderr, reason)}')
     if result.returncode:
         reason = extractor_reason(result.stderr)
         logging.warning('yt-dlp failed for %s %s: %s', target.platform, target.remote_id, reason or result.stderr[-500:])
@@ -218,4 +250,4 @@ def collect(target):
     # Playlist-level fields are usable; missing ones remain unknown.
     if target.platform in ('youtube', 'tiktok') and str(info.get('id')) != target.remote_id:
         raise CollectionError('The returned ID does not match the requested post.')
-    return metrics(info, 'yt-dlp')
+    return metrics(info, source)
