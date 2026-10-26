@@ -66,3 +66,18 @@ Rollback: deploy the previous code after a database backup. The previous code ig
 The admin page has two tabs: **Post monitoring** and **Race setup & results**. Hash links `/admin#monitoring` and `/admin#race` select a tab without loading a separate page. Both views use the same records. Registering an official post also adds it to monitoring; an existing URL is reused. Monitoring a standalone post alone does not enroll it in the competition. Manual race observations are shown in the race tab and audit; the tracker history shows automatic observations.
 
 Legacy `/race` and `/race-admin` links redirect to `/` and `/admin#race`. The health check verifies the authenticated `/admin` endpoint. API authorization is unchanged: only the leaderboard API is public. Use `PUBLIC_ORIGIN=https://e1-social-race.rrriooo.com` on the server, with no path.
+
+## Pre-race simulation
+
+Set `RACE_SIMULATION=true` in the server `.env` and recreate the container to allow test events entirely before 28 October 2026 at 18:00 KST. Official date limits remain unchanged. Mixed test/official windows are rejected. Register a real Instagram or TikTok post whose actual publication time falls within the test event. The first test collection is queued immediately; later checks follow 22:00 KST, with the existing manual Refresh available in Post monitoring. An already paused tracker record must be resumed.
+
+The leaderboard is labelled **SIMULATION — not official results** while this mode is active. It uses real platform requests, so cookies and platform blocks still apply. Manual input remains available. This is not a separate database: test posts and observations remain stored and visible in the authenticated tracker.
+
+Set `RACE_SIMULATION=false` and recreate the container when finished. The override also expires automatically at the official race start. Events beginning before the official start and their entries are then excluded from the race leaderboard and final scoring; teams with only test entries are hidden from standings. To participate officially, register posts under an official event. Test-only records remain in the database and audit. Do not change the hard-coded Grand Prix dates to run a test.
+
+Production restart (after deploying the patch):
+
+```sh
+cd /opt/social-pulse
+docker compose --env-file .env -f deploy/compose.production.yaml up -d --force-recreate
+```

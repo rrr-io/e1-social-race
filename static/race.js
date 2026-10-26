@@ -33,8 +33,8 @@ async function load() {
   if (!data.teams.length) { const row = document.createElement('tr'); cell(row, 'No teams registered yet.'); $('teams').append(row); }
   if (!data.entries.length) { const row = document.createElement('tr'); cell(row, 'No official posts yet.'); $('entries').append(row); }
   if (admin) {
-    document.querySelectorAll('.team-options').forEach(el => options(el, data.teams, t => t.name));
-    options($('event-options'), data.events, e => e.name);
+    document.querySelectorAll('.team-options').forEach(el => options(el, data.available_teams || data.teams, t => t.name));
+    options($('event-options'), data.events, e => `${e.starts < data.start ? '[TEST] ' : ''}${e.name}`);
     options($('entry-options'), data.entries, e => `${teamName(e.team_id)} / ${eventName(e.event_id)} / ${e.platform}`);
     $('audit').replaceChildren();
     for (const item of data.audit) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = `${date(item.recorded_at)} · ${item.actor} · ${item.action}`; const pre = document.createElement('pre'); pre.textContent = JSON.stringify(JSON.parse(item.details), null, 2); details.append(summary, pre); $('audit').append(details); }
