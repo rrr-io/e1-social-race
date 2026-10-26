@@ -75,6 +75,8 @@ class HTTP(unittest.TestCase):
     def test_public_race_and_private_administration(self):
         self.assertEqual(self.request('/race', auth=False)[0], 200)
         self.assertEqual(self.request('/race.js', auth=False)[0], 200)
+        self.assertEqual(self.request('/common.js', auth=False)[0], 200)
+        self.assertEqual(self.request('/common.css', auth=False)[0], 200)
         self.assertEqual(self.request('/race-admin', auth=False)[0], 401)
         self.assertEqual(self.request('/api/race/admin', auth=False)[0], 401)
         self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'}, auth=False)[0], 401)

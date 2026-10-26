@@ -1,1 +1,70 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>E1 Social Grid Race</title><link rel="stylesheet" href="/race.css"><script defer src="/race.js"></script></head><body><header><a class="brand" href="/">Social Grid Race</a><div class="cadence"><span class="dot"></span>Daily checks at 22:00 KST</div><a class="admin-link" href="/admin">Admin</a></header><main><p id="status" class="race-status">Loading race…</p><p id="message" role="status"></p><section><h2>Team & creator standings</h2><p id="rules"></p><div class="scroll"><table><thead><tr><th>Rank</th><th>Team / representative</th><th>Posts</th><th>Score</th><th>GP bonus preview</th></tr></thead><tbody id="teams"></tbody></table></div></section><section><h2>Official posts</h2><p>Scores use the latest cumulative counts, never the sum of daily snapshots. Missing data is not zero. Counts may be stale; check the observation time.</p><div class="scroll"><table><thead><tr><th>Team</th><th>Event</th><th>Platform</th><th>Likes</th><th>Comments</th><th>Views</th><th>Score</th><th>Observed (KST)</th><th>Source</th></tr></thead><tbody id="entries"></tbody></table></div></section></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0c">
+<meta name="description" content="Live team standings for the E1 Social Grid Race: engagement on the official Instagram and TikTok posts of each team.">
+<title>E1 Social Grid Race</title>
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/race.css">
+<script defer src="/common.js"></script>
+<script defer src="/race.js"></script>
+</head>
+<body>
+<a class="skip" href="#standings-heading">Skip to standings</a>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">E1</span><span>Social Grid Race</span></a>
+  <a class="admin-link" href="/admin">Admin</a>
+</header>
+<main>
+  <div id="load-banner" class="banner" role="alert" hidden></div>
+
+  <section class="hero" aria-labelledby="race-title">
+    <div class="hero-main">
+      <p class="hero-state"><span id="state-chip" class="chip">Loading…</span></p>
+      <h1 id="race-title">Who's leading the grid?</h1>
+      <p id="countdown" class="countdown">&nbsp;</p>
+    </div>
+    <dl class="facts">
+      <div><dt>Race window</dt><dd id="window">—</dd></div>
+      <div><dt>Next count</dt><dd id="next-check">Daily at 22:00 KST</dd></div>
+      <div><dt>Latest counts</dt><dd id="latest">—</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="standings-heading">
+    <div class="section-head">
+      <h2 id="standings-heading" tabindex="-1">Standings</h2>
+      <p id="rules" class="rules"></p>
+    </div>
+    <ol id="tower" class="tower" aria-busy="true" aria-describedby="rules">
+      <li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li>
+      <li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li>
+    </ol>
+    <p class="footnote">Podium bonus: P1 gets 2%, P2 and P3 get 1% of the team's Grand Prix base points. Teams with a post still awaiting counts are not ranked yet. Ties are left unresolved.</p>
+  </section>
+
+  <section aria-labelledby="posts-heading">
+    <div class="section-head">
+      <h2 id="posts-heading">Official posts <span id="post-count" class="count"></span></h2>
+      <div class="filters">
+        <label><span class="sr">Filter by team</span><select id="team-filter"><option value="">All teams</option></select></label>
+        <label><span class="sr">Filter by event</span><select id="event-filter"><option value="">All events</option></select></label>
+      </div>
+    </div>
+    <p class="footnote">Each post counts with its latest total, not the sum of daily checks. Missing counts are never treated as zero. Times are in KST.</p>
+    <div class="scroll">
+      <table id="entries-table">
+        <thead><tr><th>Team</th><th>Event</th><th>Post</th><th class="num">Likes</th><th class="num">Comments</th><th class="num">Views</th><th class="num">Score</th><th>Counted (KST)</th><th>Source</th></tr></thead>
+        <tbody id="entries"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<footer class="site-footer">
+  <p id="refreshed">Updates automatically every minute.</p>
+  <p>Fan-made project · Metadata only, no videos stored · Partial data is always flagged</p>
+</footer>
+</body>
+</html>

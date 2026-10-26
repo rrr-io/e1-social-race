@@ -137,7 +137,12 @@ def mutate(action, p, actor, limit=100):
                 raise ValueError('At least one metric must have a positive weight.')
             c.execute('UPDATE race_config SET weights=? WHERE id=1', (json.dumps(weights),))
         elif action == 'team':
-            c.execute('INSERT INTO race_teams(name,representative,base_points) VALUES(?,?,?)', (name(p.get('name')), name(p.get('representative')), integer(p.get('base_points'), True)))
+            team_name, representative = name(p.get('name')), name(p.get('representative'))
+            if c.execute('SELECT 1 FROM race_teams WHERE name=?', (team_name,)).fetchone():
+                raise ValueError(f'A team called “{team_name}” already exists.')
+            if c.execute('SELECT 1 FROM race_teams WHERE representative=?', (representative,)).fetchone():
+                raise ValueError(f'“{representative}” already represents another team. Each person can represent only one team.')
+            c.execute('INSERT INTO race_teams(name,representative,base_points) VALUES(?,?,?)', (team_name, representative, integer(p.get('base_points'), True)))
         elif action == 'base':
             if not c.execute('UPDATE race_teams SET base_points=? WHERE id=?', (integer(p.get('base_points')), integer(p.get('team_id')))).rowcount:
                 raise ValueError('Team not found.')
@@ -146,7 +151,7 @@ def mutate(action, p, actor, limit=100):
             official = START <= starts < ends <= END
             test_event = simulation_enabled() and starts < ends < START
             if not (official or test_event):
-                raise ValueError('Use a window inside the Grand Prix, or enable RACE_SIMULATION for a test event entirely before 28 October at 18:00 KST.')
+                raise ValueError('Official events must open and close between 28 Oct 18:00 and 8 Nov 23:59 KST, and close after they open. Test events before the race need RACE_SIMULATION=true on the server.')
             event_name = name(p.get('name'))
             event_id = integer(p.get('event_id')) if action == 'event-update' else None
             if c.execute('SELECT 1 FROM race_events WHERE name=? AND id!=?', (event_name, event_id or -1)).fetchone():

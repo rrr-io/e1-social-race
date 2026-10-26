@@ -1,7 +1,172 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Social Race Admin</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><link rel="stylesheet" href="/admin.css"><script defer src="/race.js"></script><script defer src="/admin.js"></script></head><body data-admin="true">
-<header><a class="brand" href="/admin">Social Race Admin</a><a class="public-link" href="/">View public leaderboard ↗</a></header>
-<main><nav class="admin-tabs" role="tablist" aria-label="Administration"><button id="setup-tab" type="button" role="tab" aria-selected="true" aria-controls="setup-panel" tabindex="0" data-tab="setup">1. Setup</button><button id="monitoring-tab" type="button" role="tab" aria-selected="false" aria-controls="monitoring-panel" tabindex="-1" data-tab="monitoring">2. Track posts</button><button id="register-tab" type="button" role="tab" aria-selected="false" aria-controls="register-panel" tabindex="-1" data-tab="register">3. Register posts</button></nav><p id="status" class="race-status">Loading race…</p><p id="message" role="status"></p><div id="setup-panel" role="tabpanel" aria-labelledby="setup-tab"><h2>Events, teams & creators</h2><p class="workflow-note">Create your events and team/creator pairs here. Then track a post and register it using these existing records. All event times use KST.</p><section aria-labelledby="events-heading"><h3 id="events-heading">Posting events</h3><p>Review event windows in KST. Edit an event to rename it or adjust its dates. Assigned posts must remain inside its window.</p><div class="scroll"><table><thead><tr><th>Event</th><th>Type</th><th>Opens (KST)</th><th>Closes (KST)</th><th>Posts</th><th>Actions</th></tr></thead><tbody id="event-list"></tbody></table></div></section><section><h3>Teams & creators</h3><div class="scroll"><table><thead><tr><th>Team</th><th>Creator</th></tr></thead><tbody id="setup-teams"></tbody></table></div></section><div class="forms"><form id="event-form" data-action="event"><h3 id="event-form-title">Add posting event</h3><input type="hidden" name="event_id"><label>Event name<input name="name" required></label><label>Window opens (KST)<input name="starts" type="datetime-local" required></label><label>Window closes (KST)<input name="ends" type="datetime-local" required></label><button id="save-event" type="submit">Add event</button> <button id="cancel-event" type="button" hidden>Cancel edit</button><p class="form-message" role="status" aria-live="polite"></p></form><form data-action="team"><h3>Add team & representative</h3><label>Team name<input name="name" required maxlength="80"></label><label>Representative name<input name="representative" required maxlength="120"></label><label>Grand Prix base points (optional)<input name="base_points" type="number" min="0"></label><button>Add team</button></form></div><details><summary>Scoring & Grand Prix points</summary><div class="forms"><form data-action="weights"><h3>Confirm scoring rules</h3><p>Integer points per engagement. Use 0 to exclude a metric. Rules lock when the race starts. Shares are not supported in this version.</p><label>Like weight<input name="likes" type="number" min="0" required></label><label>Comment weight<input name="comments" type="number" min="0" required></label><label>View weight<input name="views" type="number" min="0" required></label><button>Confirm weights</button></form><form data-action="base"><h3>Set Grand Prix base points</h3><label>Team<select name="team_id" class="team-options" required></select></label><label>Base points before podium bonus<input name="base_points" type="number" min="0" required></label><button>Save base points</button></form></div></details><details><summary>Admin audit trail</summary><div id="audit"></div></details></div><div id="monitoring-panel" role="tabpanel" aria-labelledby="monitoring-tab" hidden><p class="workflow-note">Add a link and post name. Standard checks: <span id="interval">Every 60 minutes</span>. Registered race posts: daily at 22:00 KST.</p><section class="add"><h2>Track a new post</h2><form id="add-form"><label class="url">Post link<input name="url" type="url" required placeholder="https://www.tiktok.com/@creator/video/…"></label><label>Post name<input name="label" maxlength="120" required placeholder="e.g. Jay — challenge 1"></label><button type="submit">+ Track post</button></form><p class="hint">Next, open Register posts to associate this post with an event and a team/creator. Unavailable metrics appear as “—”. Instagram and TikTok may require sign-in or block collection.</p></section>
-<div id="tracker-message" role="status" aria-live="polite"></div>
-<section><div class="toolbar"><h2>Your posts <span id="total">0</span></h2><div class="filters"><label class="sr" for="search">Search posts</label><input id="search" placeholder="Search posts…"><label class="sr" for="platform">Platform</label><select id="platform"><option value="">All platforms</option value="tiktok">TikTok</option><option value="instagram">Instagram</option><option value="youtube">YouTube</option></select></div></div><div id="posts" class="posts"><p>Loading…</p></div></section>
-</div><div id="register-panel" role="tabpanel" aria-labelledby="register-tab" hidden><h2>Register tracked posts</h2><p class="workflow-note">Choose an existing event and team/creator for a tracked post. Enter its actual publication time in KST. <a href="#monitoring">Track another post</a> · <a href="#setup">Manage events and teams</a></p><div id="registration-list" class="forms"></div><details><summary>Manual counts & final results</summary><div class="forms"><form data-action="manual"><h3>Record manual counts</h3><label>Official post<select name="entry_id" id="entry-options" required></select></label><label>Observed at (KST)<input name="observed_at" type="datetime-local" required></label><label>Likes<input name="likes" type="number" min="0"></label><label>Comments<input name="comments" type="number" min="0"></label><label>Views<input name="views" type="number" min="0"></label><label>Evidence reference / correction reason<textarea name="evidence" maxlength="500" required></textarea></label><label class="check"><input name="final" type="checkbox"> I certify these are the final eligible counts at the race cutoff, supported by the evidence above.</label><button>Save observation</button></form><form data-action="finalize"><h3>Publish final results</h3><p>Requires certified final counts for every post. Podium ties block finalization. This freezes the competition records and cannot be undone in this interface. Bonus figures are previews, not transfers to another system.</p><label class="check"><input type="checkbox" required> I have reviewed eligibility, evidence, scoring and results.</label><button>Freeze and publish final results</button></form></div><section><h2>Team & creator standings</h2><p id="rules"></p><div class="scroll"><table><thead><tr><th>Rank</th><th>Team / representative</th><th>Posts</th><th>Score</th><th>GP bonus preview</th></tr></thead><tbody id="teams"></tbody></table></div></section><section><h2>Official posts</h2><p>Scores use the latest cumulative counts, never the sum of daily snapshots. Missing data is not zero. Counts may be stale; check the observation time.</p><div class="scroll"><table><thead><tr><th>Team</th><th>Event</th><th>Platform</th><th>Likes</th><th>Comments</th><th>Views</th><th>Score</th><th>Observed (KST)</th><th>Source</th></tr></thead><tbody id="entries"></tbody></table></div></section></details></div><footer>Metadata only · No videos stored · Partial data always flagged</footer></main><dialog id="history"><div class="dialog-head"><h2 id="history-title">History</h2><button id="close-history" aria-label="Close history">×</button></div><p class="hint">Times use your browser’s local timezone. Changes are measured from the first snapshot. Missing values are never estimated.</p><div id="history-content"></div></dialog>
-</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0c">
+<title>Social Race Admin</title>
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/admin.css">
+<script defer src="/common.js"></script>
+<script defer src="/app.js"></script>
+<script defer src="/race.js"></script>
+<script defer src="/admin.js"></script>
+</head>
+<body data-admin="true">
+<header class="topbar">
+  <a class="brand" href="/admin"><span class="brand-mark" aria-hidden="true">E1</span><span>Race Admin</span></a>
+  <a class="public-link" href="/" target="_blank" rel="noopener">Public leaderboard ↗</a>
+</header>
+<nav class="admin-tabs" role="tablist" aria-label="Administration">
+  <button id="setup-tab" type="button" role="tab" aria-selected="true" aria-controls="setup-panel" tabindex="0" data-tab="setup"><span class="step">1</span>Setup</button>
+  <button id="monitoring-tab" type="button" role="tab" aria-selected="false" aria-controls="monitoring-panel" tabindex="-1" data-tab="monitoring"><span class="step">2</span>Track posts <span id="attention-count" class="tab-badge err" title="Posts needing attention"></span></button>
+  <button id="register-tab" type="button" role="tab" aria-selected="false" aria-controls="register-panel" tabindex="-1" data-tab="register"><span class="step">3</span>Register <span id="register-count" class="tab-badge" title="Posts waiting for registration"></span></button>
+</nav>
+<main>
+  <p id="status" class="race-status">Loading race…</p>
+  <div id="message" role="alert" hidden></div>
+
+  <div id="setup-panel" role="tabpanel" aria-labelledby="setup-tab">
+    <h2>Events, teams &amp; scoring</h2>
+    <p class="workflow-note">Prepare the race here, then track and register posts. All event times are in KST.</p>
+    <ol id="checklist" class="checklist" aria-label="Setup progress"></ol>
+
+    <section aria-labelledby="events-heading">
+      <h3 id="events-heading">Posting events</h3>
+      <p class="section-note">Assigned posts must stay inside their event window. Use Edit to rename an event or adjust its dates.</p>
+      <div class="scroll"><table><thead><tr><th>Event</th><th>Type</th><th>Opens (KST)</th><th>Closes (KST)</th><th>Posts</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="event-list"></tbody></table></div>
+    </section>
+
+    <section aria-labelledby="teams-heading">
+      <h3 id="teams-heading">Teams &amp; creators</h3>
+      <div class="scroll"><table><thead><tr><th>Team</th><th>Creator</th><th>GP base points</th></tr></thead><tbody id="setup-teams"></tbody></table></div>
+    </section>
+
+    <div class="forms">
+      <form id="event-form" data-action="event">
+        <h3 id="event-form-title">Add posting event</h3>
+        <input type="hidden" name="event_id">
+        <label>Event name<input name="name" required maxlength="500" autocomplete="off" placeholder="e.g. Race 1 · Opening lap"></label>
+        <label>Window opens (KST)<input name="starts" type="datetime-local" required></label>
+        <label>Window closes (KST)<input name="ends" type="datetime-local" required><small class="field-hint">Official events must fall between 28 Oct 18:00 and 8 Nov 23:59 KST.</small></label>
+        <div class="form-actions"><button id="save-event" type="submit">Add event</button><button id="cancel-event" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
+        <p class="form-message" role="status" aria-live="polite"></p>
+      </form>
+      <form data-action="team">
+        <h3>Add team &amp; representative</h3>
+        <label>Team name<input name="name" required maxlength="80" autocomplete="off" placeholder="e.g. ALPINOO"></label>
+        <label>Representative name<input name="representative" required maxlength="120" autocomplete="off"><small class="field-hint">Each team has exactly one representative.</small></label>
+        <label>Grand Prix base points <span class="optional">optional</span><input name="base_points" type="number" min="0" inputmode="numeric"></label>
+        <div class="form-actions"><button type="submit">Add team</button></div>
+        <p class="form-message" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+
+    <details id="scoring-details">
+      <summary>Scoring &amp; Grand Prix points</summary>
+      <div class="forms">
+        <form data-action="weights">
+          <h3>Scoring rules</h3>
+          <p class="section-note">Whole points per engagement; 0 excludes a metric. Rules lock once the race starts.</p>
+          <div class="field-row">
+            <label>Per like<input name="likes" type="number" min="0" required inputmode="numeric"></label>
+            <label>Per comment<input name="comments" type="number" min="0" required inputmode="numeric"></label>
+            <label>Per view<input name="views" type="number" min="0" required inputmode="numeric"></label>
+          </div>
+          <div class="form-actions"><button type="submit">Confirm scoring rules</button></div>
+          <p class="form-message" role="status" aria-live="polite"></p>
+        </form>
+        <form data-action="base">
+          <h3>Grand Prix base points</h3>
+          <label>Team<select name="team_id" class="team-options" required></select></label>
+          <label>Base points before podium bonus<input name="base_points" type="number" min="0" required inputmode="numeric"></label>
+          <div class="form-actions"><button type="submit">Save base points</button></div>
+          <p class="form-message" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </details>
+    <details>
+      <summary>Admin audit trail</summary>
+      <div id="audit" class="audit"></div>
+    </details>
+  </div>
+
+  <div id="monitoring-panel" role="tabpanel" aria-labelledby="monitoring-tab" hidden>
+    <section class="add" aria-labelledby="add-heading">
+      <h2 id="add-heading">Track a new post</h2>
+      <form id="add-form">
+        <label class="url">Post link<input name="url" type="url" required inputmode="url" autocomplete="off" placeholder="https://www.instagram.com/p/…"></label>
+        <label>Post name<input name="label" maxlength="120" required autocomplete="off" placeholder="e.g. ALPINOO · Race 1 reel"></label>
+        <button type="submit">+ Track post</button>
+      </form>
+      <div id="tracker-message" role="status" aria-live="polite"></div>
+      <p class="hint">Instagram and TikTok posts can then be registered for the race. Standard checks run <span id="interval">every 60 minutes</span>; registered race posts are checked daily at 22:00 KST.</p>
+    </section>
+
+    <section aria-labelledby="posts-heading">
+      <div class="toolbar">
+        <h2 id="posts-heading">Your posts <span id="total" class="count">0</span></h2>
+        <div class="filters">
+          <label class="search"><span class="sr">Search posts</span><input id="search" type="search" placeholder="Search posts…" autocomplete="off"></label>
+          <label><span class="sr">Platform</span><select id="platform"><option value="">All platforms</option><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="youtube">YouTube</option></select></label>
+          <label><span class="sr">Status</span><select id="status-filter"><option value="">Any status</option><option value="attention">Needs attention</option><option value="paused">Paused</option></select></label>
+        </div>
+      </div>
+      <div id="posts" class="posts" aria-busy="true"><p class="loading">Loading posts…</p></div>
+    </section>
+  </div>
+
+  <div id="register-panel" role="tabpanel" aria-labelledby="register-tab" hidden>
+    <h2>Register tracked posts</h2>
+    <p class="workflow-note">Pick the event and team/creator for each tracked post and enter when it was actually published (KST). Registration can't be changed afterwards. <a href="#monitoring">Track another post</a> · <a href="#setup">Manage events and teams</a></p>
+    <div id="registration-list" class="forms registration-list"></div>
+
+    <details>
+      <summary>Manual counts &amp; final results</summary>
+      <div class="forms">
+        <form data-action="manual">
+          <h3>Record manual counts</h3>
+          <label>Official post<select name="entry_id" id="entry-options" required></select></label>
+          <label>Observed at (KST)<input name="observed_at" type="datetime-local" required></label>
+          <div class="field-row">
+            <label>Likes<input name="likes" type="number" min="0" inputmode="numeric"></label>
+            <label>Comments<input name="comments" type="number" min="0" inputmode="numeric"></label>
+            <label>Views<input name="views" type="number" min="0" inputmode="numeric"></label>
+          </div>
+          <small class="field-hint">Leave a count empty if you don't know it: empty means unknown, not zero.</small>
+          <label>Evidence reference / correction reason<textarea name="evidence" maxlength="500" required></textarea></label>
+          <label class="check"><input name="final" type="checkbox"> I certify these are the final eligible counts at the race cutoff, supported by the evidence above.</label>
+          <div class="form-actions"><button type="submit">Save observation</button></div>
+          <p class="form-message" role="status" aria-live="polite"></p>
+        </form>
+        <form data-action="finalize">
+          <h3>Publish final results</h3>
+          <p class="section-note">Needs certified final counts for every post. A tie on the podium blocks finalisation. This freezes the competition records and cannot be undone here. Bonus figures are previews, not transfers to another system.</p>
+          <label class="check"><input type="checkbox" required> I have reviewed eligibility, evidence, scoring and results.</label>
+          <div class="form-actions"><button type="submit" class="danger">Freeze and publish final results</button></div>
+          <p class="form-message" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+      <section>
+        <h3>Team &amp; creator standings</h3>
+        <p id="rules" class="section-note"></p>
+        <div class="scroll"><table><thead><tr><th>Rank</th><th>Team / representative</th><th>Posts</th><th>Score</th><th>GP bonus preview</th></tr></thead><tbody id="teams"></tbody></table></div>
+      </section>
+      <section>
+        <h3>Official posts</h3>
+        <p class="section-note">Scores use the latest cumulative counts, never the sum of daily snapshots. Missing data is not zero.</p>
+        <div class="scroll"><table><thead><tr><th>Team</th><th>Event</th><th>Post</th><th>Likes</th><th>Comments</th><th>Views</th><th>Score</th><th>Counted (KST)</th><th>Source</th></tr></thead><tbody id="entries"></tbody></table></div>
+      </section>
+    </details>
+  </div>
+  <footer>Metadata only · No videos stored · Partial data always flagged</footer>
+</main>
+
+<dialog id="history" aria-labelledby="history-title">
+  <div class="dialog-head"><h2 id="history-title">History</h2><button id="close-history" class="btn-ghost icon" type="button" aria-label="Close history">×</button></div>
+  <p class="hint">Times use your browser's timezone. Changes are measured from the first snapshot. Missing values are never estimated.</p>
+  <div id="history-content"></div>
+</dialog>
+</body>
+</html>

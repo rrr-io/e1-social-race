@@ -81,8 +81,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(302, '', extra={'Location': redirects[path]})
         if path == '/api/race':
             return self.reply(200, race.read())
-        if path in ('/', '/race.js', '/race.css'):
-            filename, mime = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css')}[path]
+        public = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css'),
+                  '/common.js': ('common.js', 'application/javascript'), '/common.css': ('common.css', 'text/css')}
+        if path in public:
+            filename, mime = public[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
         if not self.authenticated():
             return

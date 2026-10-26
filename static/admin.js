@@ -7,6 +7,7 @@
       const active = tab.dataset.tab === selected;
       tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
       document.getElementById(tab.getAttribute('aria-controls')).hidden = !active;
+      if (active) tab.scrollIntoView({block: 'nearest', inline: 'nearest'});
     });
   }
   tabs.forEach((tab, index) => {

@@ -1,7 +1,42 @@
-[hidden]{display:none!important}.public-link{font-size:12px;color:#a9c5bb;text-decoration:none}.admin-tabs{display:flex;gap:8px;margin:0 0 24px;flex-wrap:wrap}.admin-tabs button{background:transparent;color:#98a7bd;border-color:transparent}.admin-tabs button[aria-selected="true"]{background:#1b293b;border-color:#344154;color:#7fe4cb}
-#tracker-message,#message{font-size:13px;color:#ffbeb4;min-height:17px}:is(#setup-panel,#register-panel) p{font-size:12px;line-height:1.7;color:#98a7bd}:is(#setup-panel,#register-panel) section{margin-bottom:28px}:is(#setup-panel,#register-panel) h3{font-size:15px;margin:0 0 14px}:is(#setup-panel,#register-panel) .race-status{font-size:11px;color:#a9c5bb}:is(#setup-panel,#register-panel) .scroll{overflow:auto;background:#121b29;border:1px solid #263449;border-radius:14px}:is(#setup-panel,#register-panel) table{margin-top:0}
-:is(#setup-panel,#register-panel) .forms{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}:is(#setup-panel,#register-panel) form{display:block;background:#141d2b;border:1px solid #27364a;border-radius:16px;padding:23px}:is(#setup-panel,#register-panel) label{display:block;margin:14px 0}:is(#setup-panel,#register-panel) input,:is(#setup-panel,#register-panel) select,:is(#setup-panel,#register-panel) textarea{display:block;width:100%;margin-top:8px;font:inherit;border-radius:8px;border:1px solid #344154;padding:12px;color:#e8edf5;background:#0d1522}:is(#setup-panel,#register-panel) textarea{min-height:80px;resize:vertical}:is(#setup-panel,#register-panel) .check{display:flex;gap:10px;align-items:flex-start;line-height:1.6}:is(#setup-panel,#register-panel) .check input{width:16px;flex:none;margin-top:2px}:is(#setup-panel,#register-panel) details{padding:12px 0;border-bottom:1px solid #253041;font-size:12px}:is(#setup-panel,#register-panel) summary{cursor:pointer;color:#aab8ca}:is(#setup-panel,#register-panel) pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}@media(max-width:800px){:is(#setup-panel,#register-panel) .forms{grid-template-columns:1fr}}
+/* Admin tabs, setup checklist and registration cards. */
+.admin-tabs{position:sticky;top:0;z-index:20;display:flex;gap:6px;max-width:1180px;margin:auto;padding:8px 24px;background:#0a0a0ce6;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.admin-tabs::-webkit-scrollbar{display:none}
+.admin-tabs button{display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--muted);border-color:transparent;flex:none}
+.admin-tabs button:hover{color:var(--text);border-color:var(--line-strong);filter:none}
+.admin-tabs button[aria-selected="true"]{background:var(--accent-soft);border-color:#6a3815;color:var(--accent)}
+.step{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;font-size:11px;background:var(--surface-2);color:var(--muted)}
+[aria-selected="true"] .step{background:var(--accent);color:var(--accent-ink)}
+.tab-badge{min-width:20px;height:20px;padding:0 6px;border-radius:999px;font-size:11px;display:inline-grid;place-items:center;background:var(--warn-soft);color:var(--warn)}
+.tab-badge.err{background:var(--err-soft);color:var(--err)}
+.tab-badge:empty{display:none}
 
-:is(#setup-panel,#register-panel) .form-message{color:#ffbeb4;margin:12px 0 0}:is(#setup-panel,#register-panel) #cancel-event{background:transparent;color:#aab8ca;border-color:#344154}
+#message:not([hidden]){margin-bottom:20px}
 
-#setup-panel>section{margin-bottom:24px}.registration-card{background:#141d2b;border:1px solid #27364a;border-radius:16px;padding:22px}.registration-card h3{overflow-wrap:anywhere}.registration-card a{font-size:12px;color:#a9c5bb}.registration-card form{padding:0!important;border:0!important}.registration-card .assignment{color:#7fe4cb;font-size:12px}.admin-tabs button{white-space:normal}
+.checklist{list-style:none;margin:0 0 28px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.checklist li{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
+.checklist .tick{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;font-size:13px;font-weight:800}
+.checklist .done .tick{background:var(--ok-soft);color:var(--ok)}
+.checklist .todo{border-color:#5c4a17}
+.checklist .todo .tick{background:var(--warn-soft);color:var(--warn)}
+.checklist strong,.checklist a{display:block;font-size:14px;color:var(--text)}
+.checklist a{color:var(--accent)}
+.checklist span:not(.tick){display:block;font-size:12px;color:var(--muted);margin-top:2px;line-height:1.5}
+
+.registration-list{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.registration-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;min-width:0}
+.registration-card .card-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.registration-card h3{overflow-wrap:anywhere;margin:0 0 6px}
+.registration-card>a{font-size:13px;color:var(--accent);text-decoration:none;display:inline-block;padding:4px 0}
+.registration-card form{padding:0;border:0;background:none;margin-top:14px}
+.registration-card form button{width:100%}
+.registration-card .assignment{color:var(--ok);font-size:13px;margin:10px 0 0}
+.empty-panel{grid-column:1/-1;padding:36px 20px;text-align:center;border:1px dashed var(--line-strong);border-radius:var(--radius)}
+.empty-panel strong{display:block;font-size:17px;margin-bottom:4px}
+.empty-panel a{color:var(--accent)}
+
+@media(max-width:800px){
+  .admin-tabs{padding:8px 16px}
+  .admin-tabs button{padding:0 12px}
+  .registration-list{grid-template-columns:1fr}
+}
+@media(max-width:520px){.admin-tabs .step{display:none}.admin-tabs{gap:2px}.admin-tabs button{padding:0 10px}}

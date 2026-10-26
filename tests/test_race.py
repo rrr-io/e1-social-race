@@ -35,8 +35,10 @@ class Race(unittest.TestCase):
     def test_slot_and_identity_constraints(self):
         with self.assertRaisesRegex(ValueError, 'already has a post'):
             race.mutate('entry', {**self.entry, 'url': 'https://www.instagram.com/p/XYZ/'}, 'admin')
-        with self.assertRaises(sqlite3.IntegrityError):
+        with self.assertRaisesRegex(ValueError, 'already represents another team'):
             race.mutate('team', {'name': 'Other', 'representative': 'creator x'}, 'admin')
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            race.mutate('team', {'name': 'ALPINOO', 'representative': 'someone new'}, 'admin')
         with storage.connection() as c:
             self.assertEqual(c.execute('SELECT count(*) FROM posts').fetchone()[0], 1)
         race.mutate('entry', {**self.entry, 'url': 'https://www.tiktok.com/@creator/video/1234567890123456789'}, 'admin')
