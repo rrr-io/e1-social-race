@@ -126,11 +126,11 @@ function labelCells(table) {
   }
 }
 
-// Known E1 teams get their colour; anything else falls back to neutral.
-const TEAM_KEYS = [['jake', 'mcjakey'], ['jay', 'jaybull'], ['alpin', 'alpinoo'], ['hoon', 'hoonrari'], ['meow', 'meowcedes'], ['rik', 'rikston']];
+// The six E1 teams, matched by exact name ("TEAM " prefix, case and spacing ignored).
+const TEAM_KEYS = {mcjakey: 'mcjakey', jaybullracing: 'jaybull', alpinoo: 'alpinoo', hoonrari: 'hoonrari', meowcedes: 'meowcedes', rikstondrift: 'rikston'};
 function teamKey(name) {
-  const plain = String(name || '').toLowerCase().replace(/[^a-z]/g, '');
-  return (TEAM_KEYS.find(([needle]) => plain.includes(needle)) || [null, 'other'])[1];
+  const plain = String(name || '').toLowerCase().replace(/[^a-z]/g, '').replace(/^team/, '');
+  return TEAM_KEYS[plain] || 'other';
 }
 
 function busy(button, on, label) {
