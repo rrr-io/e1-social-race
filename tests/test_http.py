@@ -93,7 +93,8 @@ class HTTP(unittest.TestCase):
         status, body = self.request('/admin')
         self.assertEqual(status, 200)
         self.assertIn(b'id="monitoring-panel"', body)
-        self.assertIn(b'id="race-panel"', body)
+        self.assertIn(b'id="setup-panel"', body)
+        self.assertIn(b'id="register-panel"', body)
         self.assertIn(b'data-action="manual"', body)
         self.assertEqual(self.request('/admin.js', auth=False)[0], 401)
         for path, target in [('/race', '/'), ('/race-admin', '/admin#race')]:

@@ -33,7 +33,7 @@ class Race(unittest.TestCase):
         race.mutate('manual', {'entry_id': 1, 'observed_at': '2026-10-28T18:30', 'likes': likes, 'comments': comments, 'evidence': 'Private evidence reference', **extra}, 'admin')
 
     def test_slot_and_identity_constraints(self):
-        with self.assertRaises(sqlite3.IntegrityError):
+        with self.assertRaisesRegex(ValueError, 'already has a post'):
             race.mutate('entry', {**self.entry, 'url': 'https://www.instagram.com/p/XYZ/'}, 'admin')
         with self.assertRaises(sqlite3.IntegrityError):
             race.mutate('team', {'name': 'Other', 'representative': 'creator x'}, 'admin')
@@ -115,3 +115,51 @@ class Race(unittest.TestCase):
         self.assertEqual(race.read()['teams'][0]['score'], 38)
         self.manual(entry_id=2, likes=30, observed_at='2026-10-28T18:40')
         self.assertEqual(race.read()['teams'][0]['score'], 48)
+
+    def test_event_edit_preserves_assignments_and_audits(self):
+        race.mutate('event-update', {'event_id': 1, 'name': 'Opening revised', 'starts': '2026-10-28T18:00', 'ends': '2026-10-29T23:00'}, 'editor')
+        data = race.read(admin=True)
+        self.assertEqual(data['available_events'][0]['name'], 'Opening revised')
+        self.assertEqual(data['available_events'][0]['post_count'], 1)
+        self.assertEqual(data['entries'][0]['event_id'], 1)
+        audit = data['audit'][0]
+        self.assertEqual(audit['actor'], 'editor')
+        detail = json.loads(audit['details'])
+        self.assertEqual(detail['before']['name'], 'Opening')
+        self.assertEqual(detail['after']['name'], 'Opening revised')
+        self.assertNotIn('available_events', race.read())
+
+    def test_event_edit_cannot_exclude_posts(self):
+        with self.assertRaisesRegex(ValueError, 'exclude 1'):
+            race.mutate('event-update', {'event_id': 1, 'name': 'Invalid', 'starts': '2026-10-28T18:30', 'ends': '2026-10-28T23:00'}, 'admin')
+        self.assertEqual(race.read()['events'][0]['name'], 'Opening')
+
+    def test_event_edit_unknown_duplicate_and_frozen(self):
+        edit = {'event_id': 999, 'name': 'Changed', 'starts': '2026-10-28T18:00', 'ends': '2026-10-28T23:00'}
+        with self.assertRaisesRegex(ValueError, 'not found'):
+            race.mutate('event-update', edit, 'admin')
+        race.mutate('event', {'name': 'Second', 'starts': '2026-10-29T18:00', 'ends': '2026-10-29T23:00'}, 'admin')
+        with self.assertRaisesRegex(ValueError, 'name already exists'):
+            race.mutate('event-update', {**edit, 'event_id': 1, 'name': 'Second'}, 'admin')
+        with storage.connection() as c:
+            c.execute("UPDATE race_config SET frozen='{}'")
+        with self.assertRaisesRegex(ValueError, 'frozen'):
+            race.mutate('event-update', {**edit, 'event_id': 1}, 'admin')
+
+    def test_register_existing_post_keeps_history(self):
+        with storage.connection() as c:
+            pid = c.execute("INSERT INTO posts(platform,remote_id,url,label,created_at) VALUES('tiktok','1234567890123456789','https://www.tiktok.com/@creator/video/1234567890123456789','Jay post',?)", (race.START,)).lastrowid
+            c.execute("INSERT INTO snapshots(post_id,collected_at,likes,comments,views,source) VALUES(?,?,10,2,100,'test')", (pid, race.START + 1800))
+        payload = {'post_id': pid, 'team_id': 1, 'event_id': 1, 'published_at': '2026-10-28T18:10'}
+        race.mutate('register-post', payload, 'admin')
+        with storage.connection() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM posts').fetchone()[0], 2)
+            self.assertEqual(c.execute('SELECT count(*) FROM snapshots WHERE post_id=?', (pid,)).fetchone()[0], 1)
+        post = next(p for p in race.read(admin=True)['tracked_posts'] if p['id'] == pid)
+        self.assertEqual(post['assigned_team'], 'Alpinoo')
+        self.assertEqual(post['assigned_event'], 'Opening')
+        with self.assertRaises(ValueError):
+            race.mutate('register-post', payload, 'admin')
+        with self.assertRaisesRegex(ValueError, 'Tracked post not found'):
+            race.mutate('register-post', {**payload, 'post_id': 999}, 'admin')
+        self.assertNotIn('tracked_posts', race.read())

@@ -3,7 +3,8 @@
 This extension preserves the existing collection tracker and SQLite database.
 
 - `/`: public team/creator leaderboard and official posts. No login required.
-- `/admin#race`: authenticated race configuration and manual observations.
+- `/admin#setup`: events, teams/creators and scoring configuration.
+- `/admin#register`: register tracked posts, record manual counts and review results.
 - `/admin#monitoring`: original authenticated tracker, collection errors, pause and refresh controls.
 
 ## Confirmed mechanics
@@ -16,14 +17,14 @@ Each creator's score is the sum of their official posts' latest cumulative engag
 
 ## Setup
 
-1. Open `/admin#race` using the existing administrator credentials.
+1. Open `/admin#setup` using the existing administrator credentials.
 2. Confirm the agreed integer weights for likes, comments and views. Zero excludes a metric. No formula is preselected; rankings remain unavailable until configured. Shares/reposts are not collected in this release. Weights are locked after the race begins once configured.
 3. Add teams and their representatives. Representative names are unique, case-insensitively; enter each person's identity consistently.
 4. Add the scheduled posting events and their KST publication windows.
-5. After a post is published, register its canonical Instagram or TikTok link, team, event and publication time. The admin must verify account ownership, hashtags, theme and eligibility. These are not automatically verified. An existing tracker post is reused.
+5. In **Track posts**, add the canonical Instagram or TikTok link and a post name. In **Register posts**, find that tracked post and choose an existing event and team/creator. Enter the actual publication time in KST. The admin must verify ownership, hashtags, theme and eligibility. Registration reuses the existing tracker record and snapshots; it does not create another post.
 6. Inspect the tracker for collection failures. Record manual counts when necessary, including observation time and an evidence reference or correction reason. Blank metrics are unknown, not zero. Corrections append records rather than overwrite history. Automatic observations with a later actual timestamp supersede manual observations in the provisional standings.
 
-An official post cannot be deleted through the tracker. This MVP does not offer entry replacement, disqualification, representative reassignment or event editing. Confirm the registration before submitting it. Failed duplicate submissions roll back atomically, including any newly created tracker record.
+An official post cannot be deleted through the tracker. This MVP does not offer entry replacement, disqualification or representative reassignment. Confirm the registration before submitting it. Failed duplicate submissions roll back atomically, including any newly created tracker record.
 
 ## Observation schedule and outages
 
@@ -63,7 +64,9 @@ Rollback: deploy the previous code after a database backup. The previous code ig
 - `https://e1-social-race.rrriooo.com/` is the public leaderboard.
 - `https://e1-social-race.rrriooo.com/admin` is the authenticated administration page.
 
-The admin page has two tabs: **Post monitoring** and **Race setup & results**. Hash links `/admin#monitoring` and `/admin#race` select a tab without loading a separate page. Both views use the same records. Registering an official post also adds it to monitoring; an existing URL is reused. Monitoring a standalone post alone does not enroll it in the competition. Manual race observations are shown in the race tab and audit; the tracker history shows automatic observations.
+The admin page has three tabs: **Setup**, **Track posts**, and **Register posts**. Hash links `/admin#setup`, `/admin#monitoring` and `/admin#register` select a tab without opening another page. Old `#race` links select Setup. Track posts accepts only a link and post name. Register posts lists tracked posts and lets the admin select existing events and team/creator pairs; registered posts show their current assignment. Unsupported platforms are marked as tracking-only. Manual observations and final results are available in a collapsible section under Register posts. Scoring settings and the audit trail are under Setup. The tracker history contains automatic observations.
+
+Registration uses the authenticated `/api/race/register-post` endpoint with `post_id`, `team_id`, `event_id` and `published_at`. It rejects unknown posts and preserves the tracked post ID and history. The older `/api/race/entry` endpoint remains available for existing integrations; the admin UI no longer uses it.
 
 Legacy `/race` and `/race-admin` links redirect to `/` and `/admin#race`. The health check verifies the authenticated `/admin` endpoint. API authorization is unchanged: only the leaderboard API is public. Use `PUBLIC_ORIGIN=https://e1-social-race.rrriooo.com` on the server, with no path.
 
@@ -81,3 +84,9 @@ Production restart (after deploying the patch):
 cd /opt/social-pulse
 docker compose --env-file .env -f deploy/compose.production.yaml up -d --force-recreate
 ```
+
+## Reviewing and editing events
+
+Open `/admin#setup` and find **Posting events** above the setup forms. The list includes all events, including past simulation events, their KST windows and assigned-post counts. **Edit** fills the event form; **Save changes** updates the existing event without changing its ID or post assignments. **Cancel edit** returns the form to creation mode.
+
+The same official/simulation date rules apply to edits. A new window cannot exclude an assigned post's publication time. Events with posts cannot change from simulation to official status or vice versa. Finalized results lock all event edits. Duplicate names are rejected with a specific message. Each update records the previous and new values in the administrator audit trail. Save errors are displayed directly under the relevant form.

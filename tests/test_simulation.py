@@ -60,3 +60,15 @@ class Simulation(unittest.TestCase):
                 race.mutate('entry', entry, 'admin')
         with patch('time.time', return_value=race.START):
             self.assertEqual(race.read()['entries'], [])
+
+    def test_simulation_event_widening_and_no_conversion(self):
+        race.mutate('team', {'name': 'Jay', 'representative': 'Min'}, 'admin')
+        race.mutate('event', {'name': 'Short test', 'starts': '2026-10-26T18:50', 'ends': '2026-10-26T18:51'}, 'admin')
+        race.mutate('entry', {'team_id': 1, 'event_id': 1, 'url': 'https://www.instagram.com/p/TEST/', 'published_at': '2026-10-26T18:51'}, 'admin')
+        race.mutate('event-update', {'event_id': 1, 'name': 'Longer test', 'starts': '2026-10-25T00:00', 'ends': '2026-10-27T23:59'}, 'admin')
+        self.assertEqual(race.read()['events'][0]['ends'], race.timestamp('2026-10-27T23:59'))
+        with self.assertRaisesRegex(ValueError, 'cannot switch'):
+            race.mutate('event-update', {'event_id': 1, 'name': 'Official', 'starts': '2026-10-28T18:00', 'ends': '2026-10-29T23:59'}, 'admin')
+        with patch.dict(os.environ, {'RACE_SIMULATION': 'false'}):
+            self.assertEqual(len(race.read(admin=True)['available_events']), 1)
+            self.assertEqual(race.read()['events'], [])

@@ -26,7 +26,7 @@ function render() {
   $('#posts').innerHTML = selected.length ? selected.map(p => `<article class="card">
     <div class="card-top"><span class="platform">${escape(p.platform)}</span><span class="badge ${escape(p.status)}">${p.paused ? 'Paused · ' : ''}${escape(states[p.status] || p.status)}</span></div>
     <h3><a href="${escape(p.url)}" target="_blank" rel="noopener noreferrer">${escape(p.label || p.title || p.remote_id)} ↗</a></h3>
-    <p class="team">${escape(p.team || 'No team assigned')}</p>
+
     <div class="metrics">${[['views','Views'],['likes','Likes'],['comments','Comments']].map(([k,t]) => `<div class="metric"><span>${t}</span><strong>${fmt(p.latest?.[k])}</strong><small>${escape(delta(p,k))}</small></div>`).join('')}</div>
     <p class="meta">Latest data: ${date(p.latest?.collected_at)}${p.latest ? ` · ${escape(p.latest.source)}` : ''}<br>Last attempt: ${date(p.last_attempt)}<br>Next check: ${p.paused ? 'paused' : p.status === 'collecting' ? 'in progress' : p.next_check ? date(p.next_check) : 'queued'}</p>
     ${p.error ? `<p class="error-text">${escape(p.error)} ${p.latest ? 'Displayed values are from the last available snapshot.' : ''}</p>` : ''}
@@ -45,7 +45,7 @@ $('#add-form').addEventListener('submit', async e => {
   const button = e.target.querySelector('button'); button.disabled = true;
   try {
     await api('/api/posts', Object.fromEntries(new FormData(e.target)));
-    e.target.reset(); $('#tracker-message').textContent = 'Post added. The first check is queued.'; await reload();
+    e.target.reset(); document.dispatchEvent(new Event('posts-changed')); $('#tracker-message').textContent = 'Post added. The first check is queued.'; await reload();
   } catch(e) { error(e); } finally { button.disabled = false; }
 });
 $('#posts').addEventListener('click', async e => {
@@ -62,6 +62,7 @@ $('#posts').addEventListener('click', async e => {
     if (action === 'delete' && !confirm('Delete this post and its entire history?')) return;
     b.disabled = true;
     await api(`/api/posts/${id}/${action}`, {});
+    if (action === 'delete') document.dispatchEvent(new Event('posts-changed'));
     $('#tracker-message').textContent = action === 'refresh' ? 'Refresh queued.' : '';
     await reload();
   } catch(e) { error(e); b.disabled = false; }

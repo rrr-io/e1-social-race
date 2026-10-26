@@ -115,6 +115,8 @@ def read(admin=False):
         frozen = c.execute('SELECT frozen FROM race_config WHERE id=1').fetchone()[0]
         result = json.loads(frozen) if frozen else board(c)
         if admin:
+            result['tracked_posts'] = [dict(r) for r in c.execute('SELECT p.id,p.url,p.label,p.title,p.remote_id,p.platform,e.id AS entry_id,t.name AS assigned_team,t.representative AS assigned_creator,ev.name AS assigned_event FROM posts p LEFT JOIN race_entries e ON e.post_id=p.id LEFT JOIN race_teams t ON t.id=e.team_id LEFT JOIN race_events ev ON ev.id=e.event_id ORDER BY p.created_at DESC,p.id DESC')]
+            result['available_events'] = [dict(r) for r in c.execute('SELECT ev.*, count(e.id) AS post_count FROM race_events ev LEFT JOIN race_entries e ON e.event_id=ev.id GROUP BY ev.id ORDER BY ev.starts,ev.id')]
             result['available_teams'] = [dict(r) for r in c.execute('SELECT * FROM race_teams ORDER BY id')]
             result['audit'] = [dict(r) for r in c.execute('SELECT * FROM race_audit ORDER BY id DESC LIMIT 100')]
         return result
@@ -139,24 +141,52 @@ def mutate(action, p, actor, limit=100):
         elif action == 'base':
             if not c.execute('UPDATE race_teams SET base_points=? WHERE id=?', (integer(p.get('base_points')), integer(p.get('team_id')))).rowcount:
                 raise ValueError('Team not found.')
-        elif action == 'event':
+        elif action in ('event', 'event-update'):
             starts, ends = timestamp(p.get('starts')), timestamp(p.get('ends'))
             official = START <= starts < ends <= END
             test_event = simulation_enabled() and starts < ends < START
             if not (official or test_event):
                 raise ValueError('Use a window inside the Grand Prix, or enable RACE_SIMULATION for a test event entirely before 28 October at 18:00 KST.')
-            c.execute('INSERT INTO race_events(name,starts,ends) VALUES(?,?,?)', (name(p.get('name')), starts, ends))
-        elif action == 'entry':
-            target = normalize_url(p.get('url'))
+            event_name = name(p.get('name'))
+            event_id = integer(p.get('event_id')) if action == 'event-update' else None
+            if c.execute('SELECT 1 FROM race_events WHERE name=? AND id!=?', (event_name, event_id or -1)).fetchone():
+                raise ValueError('An event with this name already exists. Choose a different name.')
+            if event_id is None:
+                c.execute('INSERT INTO race_events(name,starts,ends) VALUES(?,?,?)', (event_name, starts, ends))
+            else:
+                existing = c.execute('SELECT * FROM race_events WHERE id=?', (event_id,)).fetchone()
+                if not existing:
+                    raise ValueError('Event not found. Reload the page.')
+                assigned = c.execute('SELECT count(*) FROM race_entries WHERE event_id=?', (event_id,)).fetchone()[0]
+                if assigned and (existing['starts'] < START) != (starts < START):
+                    raise ValueError('An event with assigned posts cannot switch between simulation and official competition.')
+                outside = c.execute('SELECT count(*) FROM race_entries WHERE event_id=? AND (published_at<? OR published_at>?)', (event_id, starts, ends)).fetchone()[0]
+                if outside:
+                    raise ValueError(f'This window would exclude {outside} assigned post(s). Keep their publication times inside the event window.')
+                c.execute('UPDATE race_events SET name=?,starts=?,ends=? WHERE id=?', (event_name, starts, ends, event_id))
+                p = {'event_id': event_id, 'before': dict(existing), 'after': {'name': event_name, 'starts': starts, 'ends': ends}}
+
+        elif action in ('entry', 'register-post'):
+            if action == 'register-post':
+                tracked = c.execute('SELECT url FROM posts WHERE id=?', (integer(p.get('post_id')),)).fetchone()
+                if not tracked:
+                    raise ValueError('Tracked post not found. Add the post in Track posts first.')
+                target = normalize_url(tracked['url'])
+            else:
+                target = normalize_url(p.get('url'))
             if target.platform not in ('instagram', 'tiktok'):
                 raise ValueError('Only Instagram and TikTok are eligible for this race.')
             team, event = integer(p.get('team_id')), integer(p.get('event_id'))
+            if not c.execute('SELECT 1 FROM race_teams WHERE id=?', (team,)).fetchone():
+                raise ValueError('Choose an existing team/creator from Setup.')
             ev = c.execute('SELECT * FROM race_events WHERE id=?', (event,)).fetchone()
             published = timestamp(p.get('published_at'))
             if not ev or not ev['starts'] <= published <= ev['ends'] or published > now:
                 raise ValueError('Publication must be within the event window and cannot be in the future.')
             if ev['starts'] < START and not simulation_enabled():
                 raise ValueError('This is a simulation event. Enable RACE_SIMULATION before the race starts to add test posts.')
+            if c.execute('SELECT 1 FROM race_entries WHERE team_id=? AND event_id=? AND platform=?', (team, event, target.platform)).fetchone():
+                raise ValueError('This team already has a post on this platform for the selected event.')
             post = c.execute('SELECT id FROM posts WHERE platform=? AND remote_id=?', (target.platform, target.remote_id)).fetchone()
             if not post:
                 if c.execute('SELECT count(*) FROM posts').fetchone()[0] >= limit:
@@ -164,6 +194,8 @@ def mutate(action, p, actor, limit=100):
                 pid = c.execute('INSERT INTO posts(platform,remote_id,url,created_at,next_check) VALUES(?,?,?,?,?)', (target.platform, target.remote_id, target.url, now, next_check(now))).lastrowid
             else:
                 pid = post['id']
+            if c.execute('SELECT 1 FROM race_entries WHERE post_id=?', (pid,)).fetchone():
+                raise ValueError('This post is already registered. It cannot be assigned to another event or team.')
             c.execute('INSERT INTO race_entries(team_id,event_id,post_id,platform,published_at) VALUES(?,?,?,?,?)', (team, event, pid, target.platform, published))
             due = now if ev['starts'] < START else next_check(now)
             c.execute('UPDATE posts SET next_check=? WHERE id=?', (due, pid))

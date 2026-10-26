@@ -217,4 +217,4 @@ The interface, application messages, comments and documentation are in English. 
 
 ## Social Grid Race
 
-The competition extension adds `/` (public standings) and `/admin` (authenticated administration with monitoring and race tabs). See [RACE.md](RACE.md) for setup, scoring, the KST schedule, manual evidence, finalization and deployment limitations. Facebook is excluded from this MVP.
+The competition extension adds `/` (public standings) and `/admin` (authenticated administration with Setup, Track posts and Register posts tabs). See [RACE.md](RACE.md) for setup, scoring, the KST schedule, manual evidence, finalization and deployment limitations. Facebook is excluded from this MVP.
