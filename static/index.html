@@ -12,6 +12,7 @@
 <script defer src="/app.js"></script>
 <script defer src="/race.js"></script>
 <script defer src="/admin.js"></script>
+<script defer src="/share.js"></script>
 </head>
 <body data-admin="true">
 <header class="topbar">
@@ -22,6 +23,7 @@
   <button id="setup-tab" type="button" role="tab" aria-selected="true" aria-controls="setup-panel" tabindex="0" data-tab="setup"><span class="step">1</span>Setup</button>
   <button id="monitoring-tab" type="button" role="tab" aria-selected="false" aria-controls="monitoring-panel" tabindex="-1" data-tab="monitoring"><span class="step">2</span>Track posts <span id="attention-count" class="tab-badge err" title="Posts needing attention"></span></button>
   <button id="register-tab" type="button" role="tab" aria-selected="false" aria-controls="register-panel" tabindex="-1" data-tab="register"><span class="step">3</span>Register <span id="register-count" class="tab-badge" title="Posts waiting for registration"></span></button>
+  <button id="share-tab" type="button" role="tab" aria-selected="false" aria-controls="share-panel" tabindex="-1" data-tab="share"><span class="step" aria-hidden="true">↗</span>Share</button>
 </nav>
 <main>
   <p id="status" class="race-status">Loading race…</p>
@@ -159,6 +161,43 @@
         <div class="scroll"><table><thead><tr><th>Team</th><th>Event</th><th>Post</th><th>Likes</th><th>Comments</th><th>Views</th><th>Score</th><th>Counted (KST)</th><th>Source</th></tr></thead><tbody id="entries"></tbody></table></div>
       </section>
     </details>
+  </div>
+  <div id="share-panel" role="tabpanel" aria-labelledby="share-tab" hidden>
+    <h2>Share image</h2>
+    <p class="workflow-note">A ready-to-post graphic of the current standings, event and race day. It updates with the latest data; pick a format and download.</p>
+    <div class="share-layout">
+      <form id="share-form" class="share-controls">
+        <fieldset>
+          <legend>Format</legend>
+          <div class="segmented">
+            <label><input type="radio" name="format" value="square" checked><span>Post<small>1080 × 1080</small></span></label>
+            <label><input type="radio" name="format" value="story"><span>Story<small>1080 × 1920</small></span></label>
+            <label><input type="radio" name="format" value="landscape"><span>Wide<small>1600 × 900</small></span></label>
+          </div>
+        </fieldset>
+        <label>Colours
+          <select name="theme">
+            <option value="leader">Team in P1</option>
+            <option value="e1">E1 orange</option>
+            <option value="mcjakey">TEAM MCJAKEY</option><option value="jaybull">TEAM JAYBULL RACING</option><option value="alpinoo">TEAM ALPINOO</option>
+            <option value="hoonrari">TEAM HOONRARI</option><option value="meowcedes">TEAM MEOWCEDES</option><option value="rikston">TEAM RIKSTON DRIFT</option>
+          </select>
+        </label>
+        <label>Headline <span class="optional">optional</span><input name="kicker" maxlength="40" autocomplete="off" placeholder="ENHYPEN MAMA GRAND PRIX"></label>
+        <fieldset>
+          <legend>Show</legend>
+          <label class="check"><input type="checkbox" name="scores" checked> Scores</label>
+          <label class="check"><input type="checkbox" name="gaps" checked> Gap to the leader</label>
+          <label class="check"><input type="checkbox" name="reps" checked> Representatives</label>
+          <label class="check"><input type="checkbox" name="bonus"> GP bonus preview</label>
+        </fieldset>
+        <div class="form-actions"><button type="submit">↓ Download PNG</button><button id="share-copy" class="btn-ghost" type="button" hidden>Copy image</button></div>
+      </form>
+      <figure class="share-preview">
+        <canvas id="share-canvas" width="1080" height="1080" role="img" aria-label="Preview of the share image"></canvas>
+        <figcaption id="share-meta" class="hint">Loading race data…</figcaption>
+      </figure>
+    </div>
   </div>
   <footer>Metadata only · No videos stored · Partial data always flagged</footer>
 </main>

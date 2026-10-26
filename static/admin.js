@@ -2,7 +2,7 @@
   const tabs = [...document.querySelectorAll('[role="tab"]')];
   function activate() {
     const hash = location.hash.slice(1);
-    const selected = ['race', 'race-setup'].includes(hash) ? 'setup' : ['setup', 'monitoring', 'register'].includes(hash) ? hash : 'setup';
+    const selected = ['race', 'race-setup'].includes(hash) ? 'setup' : ['setup', 'monitoring', 'register', 'share'].includes(hash) ? hash : 'setup';
     tabs.forEach(tab => {
       const active = tab.dataset.tab === selected;
       tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;

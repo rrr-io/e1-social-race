@@ -90,8 +90,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == '/api/race/admin':
             return self.reply(200, race.read(admin=True))
-        if path in ('/admin', '/app.js', '/style.css', '/admin.js', '/admin.css'):
-            filename, mime = {'/admin': ('index.html', 'text/html'), '/app.js': ('app.js', 'application/javascript'), '/style.css': ('style.css', 'text/css'), '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css')}[path]
+        admin_files = {'/admin': ('index.html', 'text/html'), '/app.js': ('app.js', 'application/javascript'), '/style.css': ('style.css', 'text/css'),
+                       '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css'), '/share.js': ('share.js', 'application/javascript')}
+        if path in admin_files:
+            filename, mime = admin_files[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
         if path == '/api/posts':
             return self.reply(200, {'posts': storage.rows(), 'interval_minutes': storage.INTERVAL // 60})

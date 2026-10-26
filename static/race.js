@@ -277,6 +277,7 @@ async function load() {
   renderHero(data); renderTower(data); renderTeamsTable(data); renderEntries(data);
   if ($('refreshed')) $('refreshed').textContent = `Checked for updates at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} (your time) · refreshes every minute.`;
   if (admin) renderAdmin(data);
+  document.dispatchEvent(new CustomEvent('race-loaded', {detail: data}));
   clearLoadError();
 }
 async function refresh() {
@@ -309,7 +310,7 @@ function renderAdmin(data) {
   const weightsForm = document.querySelector('form[data-action="weights"]');
   if (weightsForm && data.weights && !weightsForm.dataset.touched) for (const k of ['likes', 'comments', 'views']) weightsForm.elements[k].value = data.weights[k];
   renderChecklist(data, teams);
-  if (frozen) document.querySelectorAll('form button').forEach(button => { button.disabled = true; });
+  if (frozen) document.querySelectorAll('form[data-action] button').forEach(button => { button.disabled = true; });
 }
 
 function renderChecklist(data, teams) {

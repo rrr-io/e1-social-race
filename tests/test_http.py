@@ -99,6 +99,8 @@ class HTTP(unittest.TestCase):
         self.assertIn(b'id="register-panel"', body)
         self.assertIn(b'data-action="manual"', body)
         self.assertEqual(self.request('/admin.js', auth=False)[0], 401)
+        self.assertEqual(self.request('/share.js', auth=False)[0], 401)
+        self.assertEqual(self.request('/share.js')[0], 200)
         for path, target in [('/race', '/'), ('/race-admin', '/admin#race')]:
             connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port)
             connection.request('GET', path)
