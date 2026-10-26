@@ -1,5 +1,6 @@
 """Public metadata collectors. Never download media or replace absent counts with 0."""
 import json
+import logging
 import os
 import re
 import subprocess
@@ -142,6 +143,53 @@ def platform_cookie_copy(target):
         yield str(copied)
 
 
+def extractor_reason(stderr):
+    """The last yt-dlp ERROR line, without URLs, IDs or the bug-report boilerplate."""
+    lines = [l for l in (stderr or '').splitlines() if l.startswith('ERROR:')]
+    if not lines:
+        return ''
+    text = re.sub(r'\x1b\[[0-9;]*m', '', lines[-1])
+    text = re.sub(r'^ERROR:\s*(\[[^\]]+\]\s*)?([\w.-]+:\s+)?', '', text)
+    text = re.split(r'(?i)[;,.]?\s*(please report this issue|use --cookies|see\s+https?://)', text)[0]
+    text = re.sub(r'https?://\S+', '[link]', text)
+    text = re.sub(r'\s+', ' ', text).strip(' .;,')
+    return text[:180]
+
+
+def classify_failure(target, stderr, reason):
+    """Turn a yt-dlp failure into a message that says what to do next."""
+    detail = (stderr or '').lower()
+    label = {'tiktok': 'TikTok', 'instagram': 'Instagram', 'youtube': 'YouTube'}.get(target.platform, target.platform)
+    cookie_var = {'tiktok': 'TIKTOK_COOKIES_FILE', 'instagram': 'INSTAGRAM_COOKIES_FILE'}.get(target.platform)
+    said = f' (yt-dlp: {reason}.)' if reason else ''
+    if 'no module named' in detail:
+        return 'Install dependencies: pip install -r requirements.txt.'
+    if '429' in detail or 'too many requests' in detail or 'rate-limit' in detail or 'rate limit' in detail:
+        return f'{label} rate limit reached. A slower retry has been scheduled.'
+    if 'ip address is blocked' in detail:
+        return f'{label} is blocking the server\'s IP address for this post. Cookies usually do not help; wait for the next check or record the counts manually.'
+    if any(x in detail for x in ('captcha', 'not a bot', 'bot detection', 'automated requests', 'solve js challenge')):
+        return 'The platform reported a browser or bot challenge. A signed-in session may not resolve it. No metrics were updated.'
+    if 'empty media response' in detail:
+        return (f'Instagram returned no data for this post to an anonymous visitor. If the post opens in a private browser window, '
+                f'configure or refresh {cookie_var}; otherwise it is private or age/region restricted. No metrics were updated.')
+    if 'private' in detail or 'do not have permission' in detail or 'registered users who follow' in detail:
+        return f'This {label} post is private or visible only to followers. No metrics were updated.'
+    if any(x in detail for x in ('has been removed', 'been deleted', 'no longer available', 'video unavailable', 'not available, status code', 'http error 404', 'not found')):
+        return f'The {label} post seems to be unavailable: deleted, hidden or the link is wrong. Open the link in a browser to check.{said}'
+    if '403' in detail or 'forbidden' in detail:
+        return 'The platform denied access (HTTP 403). This does not confirm that sign-in is the cause. No metrics were updated.'
+    if any(x in detail for x in ('login', 'log in', 'logged-in', 'sign in', 'cookies')):
+        hint = f'configure or refresh {cookie_var}' if cookie_var else 'check the platform session'
+        return f'{label} requires a signed-in session for this post: {hint}. No metrics were updated.'
+    if any(x in detail for x in ('timed out', 'name resolution', 'connection reset', 'connection refused', 'network is unreachable', 'urlopen error', 'remote end closed', 'ssl')):
+        return f'Network error while contacting {label}. A retry has been scheduled.{said}'
+    if any(x in detail for x in ('unable to extract', 'unexpected response', 'universal data', 'unsupported url')):
+        return (f'{label} returned a page the extractor could not read. This usually means yt-dlp needs updating (redeploy to rebuild the image) '
+                f'or {label} served a temporary block page.{said}')
+    return f'Extraction failed for an unrecognised reason.{said or " Check the server logs."}'
+
+
 def collect(target):
     if target.platform == 'youtube' and os.environ.get('YOUTUBE_API_KEY'):
         return youtube_api(target)
@@ -149,7 +197,7 @@ def collect(target):
     command = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--dump-single-json',
                '--skip-download', '--no-playlist', '--no-warnings', '--no-progress',
                '--socket-timeout', '20', '--retries', '0', '--extractor-retries', '0',
-               '--no-check-formats']
+               '--no-check-formats', '--ignore-no-formats-error']
     try:
         with platform_cookie_copy(target) as cookies:
             if cookies:
@@ -159,18 +207,9 @@ def collect(target):
     except subprocess.TimeoutExpired as exc:
         raise CollectionError('Platform timed out after 90 seconds. A retry has been scheduled.') from exc
     if result.returncode:
-        detail = result.stderr.lower()
-        if 'no module named' in detail:
-            raise CollectionError('Install dependencies: pip install -r requirements.txt.')
-        if '429' in detail or 'too many requests' in detail:
-            raise CollectionError('Platform rate limit reached. A slower retry has been scheduled.')
-        if any(x in detail for x in ('captcha', 'not a bot', 'bot detection', 'automated requests')):
-            raise CollectionError('The platform reported a browser or bot challenge. A signed-in session may not resolve it. No metrics were updated.')
-        if '403' in detail or 'forbidden' in detail:
-            raise CollectionError('The platform denied access (HTTP 403). This does not confirm that sign-in is the cause. No metrics were updated.')
-        if any(x in detail for x in ('login', 'sign in', 'log in', 'cookies')):
-            raise CollectionError('The extractor reported a sign-in or session requirement. For TikTok or Instagram, configure or refresh TIKTOK_COOKIES_FILE / INSTAGRAM_COOKIES_FILE. No metrics were updated.')
-        raise CollectionError('Extraction failed: unavailable/unsupported post, network error or outdated extractor.')
+        reason = extractor_reason(result.stderr)
+        logging.warning('yt-dlp failed for %s %s: %s', target.platform, target.remote_id, reason or result.stderr[-500:])
+        raise CollectionError(classify_failure(target, result.stderr, reason))
     try:
         info = json.loads(result.stdout)
     except json.JSONDecodeError as exc:

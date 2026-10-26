@@ -66,7 +66,35 @@ class Cookies(unittest.TestCase):
                 self.assertFalse(paths[0].exists())
 
     def test_errors_are_distinguished(self):
-        for message,expected in [('HTTP Error 429','rate limit'),('HTTP Error 403','does not confirm'),('CAPTCHA challenge','bot challenge'),('Login required','session requirement')]:
+        for message,expected in [('HTTP Error 429','rate limit'),('HTTP Error 403','does not confirm'),('CAPTCHA challenge','bot challenge'),('Login required','signed-in session')]:
             with self.subTest(message=message), patch.dict(os.environ, {'TIKTOK_COOKIES_FILE':'', 'INSTAGRAM_COOKIES_FILE':''}), patch('collectors.subprocess.run',return_value=subprocess.CompletedProcess([],1,'',message)):
                 with self.assertRaises(collectors.CollectionError) as result: collectors.collect(TIKTOK_TARGET)
                 self.assertIn(expected,str(result.exception))
+
+    def test_real_ytdlp_errors_are_explained(self):
+        ig = collectors.normalize_url('https://www.instagram.com/p/ABCDE/')
+        cases = [
+            (TIKTOK_TARGET, 'ERROR: [TikTok] 1234567890123456789: Your IP address is blocked from accessing this post', 'blocking the server'),
+            (TIKTOK_TARGET, 'ERROR: [TikTok] 1234567890123456789: Video not available, status code 10231', 'seems to be unavailable'),
+            (TIKTOK_TARGET, 'ERROR: [TikTok] 1234567890123456789: Unable to extract universal data for rehydration; please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U', 'needs updating'),
+            (ig, 'ERROR: [Instagram] ABCDE: Instagram sent an empty media response. Check if this post is accessible in your browser without being logged-in. If it is not, then use --cookies-from-browser or --cookies for the authentication.', 'no data for this post to an anonymous visitor'),
+            (ig, 'ERROR: [Instagram] ABCDE: Unable to download webpage: <urlopen error [Errno -3] Temporary failure in name resolution> (caused by URLError)', 'Network error'),
+            (ig, 'ERROR: [Instagram] ABCDE: Something new and strange happened', 'yt-dlp: Something new and strange happened'),
+        ]
+        for target, stderr, expected in cases:
+            with self.subTest(stderr=stderr[:40]), patch.dict(os.environ, {'TIKTOK_COOKIES_FILE':'', 'INSTAGRAM_COOKIES_FILE':''}), patch('collectors.subprocess.run', return_value=subprocess.CompletedProcess([],1,'',stderr)):
+                with self.assertLogs(level='WARNING'), self.assertRaises(collectors.CollectionError) as result:
+                    collectors.collect(target)
+                self.assertIn(expected, str(result.exception))
+                self.assertNotIn('github.com', str(result.exception))
+                self.assertNotIn('please report', str(result.exception))
+
+    def test_photo_posts_do_not_fail_for_missing_video(self):
+        captured = {}
+        def fake_run(command, **kwargs):
+            captured['command'] = command
+            return subprocess.CompletedProcess(command, 0, '{"id": "ABCDE", "like_count": 12, "comment_count": 3}', '')
+        with patch.dict(os.environ, {'INSTAGRAM_COOKIES_FILE':''}), patch('collectors.subprocess.run', side_effect=fake_run):
+            data = collectors.collect(collectors.normalize_url('https://www.instagram.com/p/ABCDE/'))
+        self.assertIn('--ignore-no-formats-error', captured['command'])
+        self.assertEqual((data['likes'], data['comments'], data['views']), (12, 3, None))

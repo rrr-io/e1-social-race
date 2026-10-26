@@ -4,6 +4,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        YTDLP_REFRESH: ${YTDLP_REFRESH:-0}
     restart: unless-stopped
     init: true
     env_file: ../.env

@@ -80,8 +80,11 @@ jobs:
           chmod 600 .env
           tar -xzf release.next.tgz
           rm release.next.tgz
+          export YTDLP_REFRESH="$(date -u +%Y%m%d)"
           docker compose --env-file .env -f deploy/compose.production.yaml \
             up -d --build --force-recreate --wait --wait-timeout 180
+          docker compose --env-file .env -f deploy/compose.production.yaml \
+            exec -T social-pulse python -m yt_dlp --version | sed 's/^/yt-dlp /'
           docker compose --env-file .env -f deploy/compose.production.yaml ps
           REMOTE
       - name: Remove temporary credentials
