@@ -33,14 +33,6 @@ function rulesText(weights) {
   return `Score: ${parts.join(' · ')}${ignored.length ? ` · ${ignored.join(' and ')} don't count` : ''}.`;
 }
 
-// Next scheduled 22:00 KST check after `t`.
-function nextDailyCheck(t) {
-  const kstNow = new Date((t + 9 * 3600) * 1000);
-  let due = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), 22) / 1000 - 9 * 3600;
-  if (due <= t) due += 86400;
-  return due;
-}
-
 // Header / hero -----------------------------------------------------------
 function renderHero(data) {
   const chip = $('state-chip');
@@ -58,15 +50,75 @@ function renderHero(data) {
   chip.className = `chip ${kind}`.trim();
   chip.textContent = label;
   $('countdown').textContent = countdown;
-  $('window').textContent = `${kst(data.start)} → ${kst(data.end)}`;
-  const next = $('next-check');
-  if (data.state === 'Final' || t >= data.end) next.textContent = 'No more checks';
-  else {
-    const due = Math.min(nextDailyCheck(Math.max(t, data.start - 1)), data.end);
-    next.textContent = `${kst(due)} · in ${duration(due - t)}`;
-  }
+  renderEventNow(data, t);
+  renderOverall(data, t);
+  renderLeaderTheme(data);
   const observed = (data.entries || []).map(e => e.observed_at).filter(Boolean);
-  $('latest').textContent = observed.length ? kst(Math.max(...observed)) : 'None yet';
+  if ($('latest-line')) $('latest-line').textContent = `Counts are taken daily at 22:00 KST${observed.length ? `; latest ${kst(Math.max(...observed))} KST` : ''}.`;
+}
+
+const dayFormat = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: 'numeric', month: 'short'});
+const day = seconds => dayFormat.format(new Date(seconds * 1000));
+
+// Which posting event is open right now, or the next one.
+function renderEventNow(data, t) {
+  const box = $('event-now');
+  if (!box) return;
+  const events = [...(data.events || [])].sort((a, b) => a.starts - b.starts);
+  const live = events.filter(e => e.starts <= t && t <= e.ends);
+  const next = events.find(e => e.starts > t);
+  const label = box.querySelector('.event-label');
+  box.classList.toggle('is-live', live.length > 0);
+  let fill = 0;
+  if (live.length) {
+    const soonest = live.reduce((a, b) => (a.ends <= b.ends ? a : b));
+    label.textContent = live.length > 1 ? `${live.length} posting events open` : 'Posting event open';
+    $('event-name').textContent = live.map(e => e.name).join(' · ');
+    $('event-when').textContent = `Closes in ${duration(soonest.ends - t)} · ${kst(soonest.ends)} KST`;
+    fill = (t - soonest.starts) / (soonest.ends - soonest.starts);
+  } else if (next && data.state !== 'Final') {
+    label.textContent = 'Next posting event';
+    $('event-name').textContent = next.name;
+    $('event-when').textContent = `Opens in ${duration(next.starts - t)} · ${kst(next.starts)} KST`;
+  } else {
+    label.textContent = 'Posting events';
+    $('event-name').textContent = events.length ? 'All posting events have closed' : 'Schedule coming soon';
+    $('event-when').textContent = events.length ? `${events.length} ${events.length === 1 ? 'event' : 'events'} in this Grand Prix` : 'Events appear here once the organisers add them.';
+  }
+  $('event-fill').style.width = `${Math.round(Math.min(Math.max(fill, 0), 1) * 100)}%`;
+}
+
+// Whole Grand Prix: day N of M and a progress bar.
+function renderOverall(data, t) {
+  if (!$('overall-bar')) return;
+  const total = Math.ceil((data.end - data.start) / 86400);
+  const share = Math.min(Math.max((t - data.start) / (data.end - data.start), 0), 1);
+  let text;
+  if (t < data.start) text = `${total} days · starts ${day(data.start)}`;
+  else if (t <= data.end) text = `Day ${Math.min(Math.floor((t - data.start) / 86400) + 1, total)} of ${total}`;
+  else text = `Finished · ${total} days`;
+  $('overall-day').textContent = text;
+  $('overall-fill').style.width = `${Math.round(share * 100)}%`;
+  $('overall-bar').setAttribute('aria-valuenow', String(Math.round(share * 100)));
+  $('overall-bar').setAttribute('aria-valuetext', text);
+  $('overall-start').textContent = `${kst(data.start)} KST`;
+  $('overall-end').textContent = `${kst(data.end)} KST`;
+}
+
+// The page wears the colours of the sole P1 team; ties and empty grids keep E1 orange.
+function renderLeaderTheme(data) {
+  if (admin) return;
+  const leaders = (data.teams || []).filter(team => team.rank === 1 && team.score != null);
+  const leader = leaders.length === 1 ? leaders[0] : null;
+  const key = leader ? teamKey(leader.name) : 'other';
+  if (leader && key !== 'other') document.body.dataset.leader = key; else delete document.body.dataset.leader;
+  const chip = $('leader-chip');
+  if (chip) {
+    chip.hidden = !leader;
+    if (leader) { chip.textContent = `${leader.name} in P1`; chip.title = `The page uses ${leader.name}'s colours while they lead`; }
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = getComputedStyle(document.body).getPropertyValue('--accent-soft').trim() || '#0a0a0c';
 }
 
 // Standings: timing tower (public) or table (admin) ------------------------

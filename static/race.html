@@ -22,15 +22,23 @@
 
   <section class="hero" aria-labelledby="race-title">
     <div class="hero-main">
-      <p class="hero-state"><span id="state-chip" class="chip">Loading…</span></p>
+      <p class="hero-state"><span id="state-chip" class="chip">Loading…</span><span id="leader-chip" class="chip leader-chip" hidden></span></p>
       <h1 id="race-title">Who's leading the grid?</h1>
       <p id="countdown" class="countdown">&nbsp;</p>
     </div>
-    <dl class="facts">
-      <div><dt>Race window</dt><dd id="window">—</dd></div>
-      <div><dt>Next count</dt><dd id="next-check">Daily at 22:00 KST</dd></div>
-      <div><dt>Latest counts</dt><dd id="latest">—</dd></div>
-    </dl>
+    <div class="race-card">
+      <div id="event-now" class="event-now" aria-live="polite">
+        <span class="event-label">Posting event</span>
+        <strong id="event-name">—</strong>
+        <span id="event-when" class="event-when"></span>
+        <div class="bar small" aria-hidden="true"><span id="event-fill"></span></div>
+      </div>
+      <div class="overall">
+        <div class="overall-head"><span class="event-label">Grand Prix</span><span id="overall-day" class="overall-day"></span></div>
+        <div class="bar" role="progressbar" id="overall-bar" aria-label="Grand Prix progress" aria-valuemin="0" aria-valuemax="100"><span id="overall-fill"></span></div>
+        <div class="overall-ends"><span id="overall-start"></span><span id="overall-end"></span></div>
+      </div>
+    </div>
   </section>
 
   <section aria-labelledby="standings-heading">
@@ -63,7 +71,7 @@
   </section>
 </main>
 <footer class="site-footer">
-  <p id="refreshed">Updates automatically every minute.</p>
+  <p><span id="latest-line">Counts are taken daily at 22:00 KST.</span> <span id="refreshed">Updates automatically every minute.</span></p>
   <p>Fan-made project · Metadata only, no videos stored · Partial data is always flagged</p>
 </footer>
 </body>

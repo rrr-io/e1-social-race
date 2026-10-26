@@ -1,6 +1,6 @@
 /* Public leaderboard. Tokens and shared components live in common.css. */
 *{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:radial-gradient(1200px 400px at 85% -120px,#ff7a1a22,transparent 70%),var(--bg)}
+body{margin:0;min-height:100vh;background:radial-gradient(1200px 420px at 85% -120px,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%),var(--bg)}
 a{color:inherit}
 .skip{position:absolute;left:12px;top:-60px;padding:10px 14px;background:var(--accent);color:var(--accent-ink);border-radius:8px;font-weight:700;z-index:60}
 .skip:focus{top:12px}
@@ -19,11 +19,24 @@ section{margin-bottom:44px}
 .hero-state{margin:0 0 14px}
 h1{font-size:clamp(30px,5.4vw,52px);line-height:1.05;letter-spacing:-1.2px;margin:0;font-weight:850}
 .countdown{margin:14px 0 0;font-family:var(--mono);font-size:clamp(16px,2.4vw,20px);color:var(--accent);font-variant-numeric:tabular-nums;min-height:1.4em}
-.facts{display:grid;gap:0;margin:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
-.facts div{display:flex;justify-content:space-between;gap:16px;padding:13px 16px;border-bottom:1px solid var(--line)}
-.facts div:last-child{border-bottom:0}
-.facts dt{font-size:13px;color:var(--muted)}
-.facts dd{margin:0;font-size:13px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.race-card{display:grid;gap:18px;padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.event-label{display:block;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--subtle);margin-bottom:6px}
+.event-now strong{display:block;font-size:17px;line-height:1.3}
+.event-when{display:block;font-size:13px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+.event-now.is-live .event-label{color:var(--accent)}
+.event-now.is-live .event-label::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:7px;vertical-align:1px;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media(prefers-reduced-motion:reduce){.event-now.is-live .event-label::before{animation:none}}
+.bar{position:relative;height:8px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.bar.small{height:4px;margin-top:10px}
+.bar span{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:var(--accent);transition:width .6s ease}
+.event-now:not(.is-live) .bar{display:none}
+.overall{padding-top:16px;border-top:1px solid var(--line)}
+.overall-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.overall-day{font-size:13px;font-weight:650;font-variant-numeric:tabular-nums}
+.overall-ends{display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--subtle)}
+.leader-chip{margin-left:8px}
+.leader-chip::before{content:"";width:8px;height:8px;border-radius:2px;background:var(--accent)}
 
 /* Section heads */
 .section-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px;margin-bottom:14px}
@@ -39,7 +52,7 @@ h2:focus{outline:none}
 .tower-row{display:grid;grid-template-columns:52px 4px minmax(0,1fr) auto minmax(110px,auto);align-items:center;gap:0 16px;min-height:68px;padding:10px 18px 10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
 .pos{font-family:var(--mono);font-weight:800;font-size:18px;text-align:center;color:var(--muted)}
 .podium-1 .pos{color:var(--accent)}.podium-2 .pos,.podium-3 .pos{color:var(--text)}
-.podium-1{border-color:#6a3815;background:linear-gradient(90deg,#ff7a1a14,var(--surface) 40%)}
+.podium-1{border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 10%,transparent),var(--surface) 45%)}
 .team-bar{align-self:stretch;border-radius:4px;background:var(--team)}
 .who{min-width:0}
 .who strong{display:block;font-size:16px;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
