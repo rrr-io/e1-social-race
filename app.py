@@ -83,7 +83,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, race.read())
         public = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css'),
                   '/common.js': ('common.js', 'application/javascript'), '/common.css': ('common.css', 'text/css'),
-                  '/e1-logo.png': ('e1-logo.png', 'image/png')}
+                  '/e1-logo.png': ('e1-logo.png', 'image/png'), '/favicon.ico': ('favicon.ico', 'image/x-icon'),
+                  '/favicon-32.png': ('favicon-32.png', 'image/png'), '/apple-touch-icon.png': ('apple-touch-icon.png', 'image/png'),
+                  '/icon-512.png': ('icon-512.png', 'image/png'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json')}
         if path in public:
             filename, mime = public[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
