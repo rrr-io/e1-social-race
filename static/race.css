@@ -1,4 +1,6 @@
 /* Public leaderboard. Tokens and shared components live in common.css. */
+/* Neutral white/grey by default; on phones the selected board's P1 team sets [data-leader]. */
+body:not([data-leader]){--accent:#ececf1;--accent-ink:#111115;--accent-soft:#25252c}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;background:radial-gradient(1200px 420px at 85% -120px,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%),var(--bg)}
 a{color:inherit}
@@ -7,7 +9,7 @@ a{color:inherit}
 
 .topbar{max-width:1120px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;padding-top:max(20px,env(safe-area-inset-top))}
 .brand{display:flex;align-items:center;gap:12px;font-size:16px;font-weight:800;letter-spacing:.5px;text-decoration:none}
-.brand-mark{display:grid;place-items:center;width:40px;height:30px;border-radius:7px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-style:italic;letter-spacing:-.5px;transform:skewX(-8deg)}
+.brand-mark{display:block;flex:none;width:56px;height:28px;background:var(--accent);-webkit-mask:url(/e1-logo.png) center/contain no-repeat;mask:url(/e1-logo.png) center/contain no-repeat;font-size:0;color:transparent;overflow:hidden}
 .admin-link{font-size:13px;color:var(--subtle);text-decoration:none;padding:10px 4px}
 .admin-link:hover{color:var(--text)}
 

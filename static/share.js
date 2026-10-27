@@ -15,6 +15,9 @@ const FORMATS = {square: [1080, 1080], story: [1080, 1920], landscape: [1600, 90
 const MAX_ROWS = 8;
 
 let data = null;
+const logo = new Image();
+logo.addEventListener('load', () => draw());
+logo.src = '/e1-logo.png';
 
 // Helpers -------------------------------------------------------------------
 const font = (size, weight = 700, family = SANS, italic = false) => `${italic ? 'italic ' : ''}${weight} ${Math.round(size)}px ${family}`;
@@ -121,13 +124,16 @@ function background(ctx, W, H, accent, L) {
 
 function header(ctx, W, L, accent, ink, f) {
   const s = L.s, y = L.header;
-  // Skewed E1 badge.
-  ctx.save(); ctx.translate(L.pad, y); ctx.transform(1, 0, -0.18, 1, 0, 0);
-  ctx.fillStyle = accent; rrect(ctx, 6 * s, 0, 84 * s, 58 * s, 10 * s); ctx.fill();
-  ctx.fillStyle = ink; ctx.font = font(36 * s, 900, SANS, true); ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-  ctx.fillText('E1', 48 * s, 30 * s); ctx.restore();
+  // E1 logo, tinted with the accent colour.
+  const lh = 50 * s, lw = logo.complete && logo.naturalWidth ? lh * logo.naturalWidth / logo.naturalHeight : 100 * s;
+  if (logo.complete && logo.naturalWidth) {
+    const tint = document.createElement('canvas'); tint.width = Math.ceil(lw); tint.height = Math.ceil(lh);
+    const tc = tint.getContext('2d');
+    tc.drawImage(logo, 0, 0, lw, lh); tc.globalCompositeOperation = 'source-in'; tc.fillStyle = accent; tc.fillRect(0, 0, lw, lh);
+    ctx.drawImage(tint, L.pad, y + 4 * s);
+  }
   ctx.textBaseline = 'middle'; ctx.fillStyle = '#f4f4f6'; ctx.font = font(28 * s, 800);
-  spaced(ctx, 'SOCIAL GRID RACE', L.pad + 112 * s, y + 29 * s, 4 * s);
+  spaced(ctx, 'SOCIAL GRID RACE', L.pad + 126 * s, y + 29 * s, 4 * s);
   // Status pill on the right.
   ctx.font = font(20 * s, 800);
   const label = f.status;

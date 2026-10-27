@@ -77,6 +77,7 @@ class HTTP(unittest.TestCase):
         self.assertEqual(self.request('/race.js', auth=False)[0], 200)
         self.assertEqual(self.request('/common.js', auth=False)[0], 200)
         self.assertEqual(self.request('/common.css', auth=False)[0], 200)
+        self.assertEqual(self.request('/e1-logo.png', auth=False)[0], 200)
         self.assertEqual(self.request('/race-admin', auth=False)[0], 401)
         self.assertEqual(self.request('/api/race/admin', auth=False)[0], 401)
         self.assertEqual(self.request('/api/race/team', {'name':'Team','instagram':'Person','tiktok':'Person TT'}, auth=False)[0], 401)

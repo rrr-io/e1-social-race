@@ -82,10 +82,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/race':
             return self.reply(200, race.read())
         public = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css'),
-                  '/common.js': ('common.js', 'application/javascript'), '/common.css': ('common.css', 'text/css')}
+                  '/common.js': ('common.js', 'application/javascript'), '/common.css': ('common.css', 'text/css'),
+                  '/e1-logo.png': ('e1-logo.png', 'image/png')}
         if path in public:
             filename, mime = public[path]
-            return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
+            return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
         if not self.authenticated():
             return
         if path == '/api/race/admin':
@@ -94,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
                        '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css'), '/share.js': ('share.js', 'application/javascript')}
         if path in admin_files:
             filename, mime = admin_files[path]
-            return self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
+            return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
         if path == '/api/posts':
             return self.reply(200, {'posts': storage.rows(), 'interval_minutes': storage.INTERVAL // 60})
         match = re.fullmatch(r'/api/posts/(\d+)/(history|export)', path)
