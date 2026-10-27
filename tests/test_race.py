@@ -165,3 +165,38 @@ class Race(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Tracked post not found'):
             race.mutate('register-post', {**payload, 'post_id': 999}, 'admin')
         self.assertNotIn('tracked_posts', race.read())
+
+
+
+class Management(unittest.TestCase):
+    """Editing and deleting teams/creators and events from the admin."""
+    setUp = Race.setUp
+    tearDown = Race.tearDown
+
+    def test_team_update_changes_creator_and_points(self):
+        race.mutate('team-update', {'team_id': 1, 'name': 'TEAM ALPINOO', 'representative': 'New Creator', 'base_points': '1200'}, 'admin')
+        team = race.read(admin=True)['available_teams'][0]
+        self.assertEqual((team['name'], team['representative'], team['base_points']), ('TEAM ALPINOO', 'New Creator', 1200))
+
+    def test_team_update_rejects_taken_names(self):
+        race.mutate('team', {'name': 'TEAM HOONRARI', 'representative': 'Someone'}, 'admin')
+        with self.assertRaisesRegex(ValueError, 'already represents another team'):
+            race.mutate('team-update', {'team_id': 1, 'name': 'Alpinoo', 'representative': 'someone'}, 'admin')
+        with self.assertRaisesRegex(ValueError, 'already has a creator'):
+            race.mutate('team-update', {'team_id': 1, 'name': 'team hoonrari', 'representative': 'Creator X'}, 'admin')
+
+    def test_delete_unregisters_posts_but_keeps_tracking(self):
+        for action, key in (('event-delete', 'event_id'), ('team-delete', 'team_id')):
+            with self.subTest(action=action):
+                self.tearDown(); self.setUp()
+                race.mutate('manual', {'entry_id': 1, 'observed_at': '2026-10-28T18:30', 'likes': 3, 'evidence': 'ref'}, 'admin')
+                race.mutate(action, {key: 1}, 'admin')
+                data = race.read(admin=True)
+                self.assertEqual(data['entries'], [])
+                with storage.connection() as c:
+                    self.assertEqual(c.execute('SELECT count(*) FROM posts').fetchone()[0], 1)
+                    self.assertEqual(c.execute('SELECT count(*) FROM race_manual').fetchone()[0], 0)
+                    audit = json.loads(c.execute('SELECT details FROM race_audit ORDER BY id DESC LIMIT 1').fetchone()[0])
+                self.assertEqual(audit['unregistered_posts'], 1)
+                with self.assertRaisesRegex(ValueError, 'Already deleted'):
+                    race.mutate(action, {key: 1}, 'admin')

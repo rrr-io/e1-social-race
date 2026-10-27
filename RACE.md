@@ -90,3 +90,9 @@ docker compose --env-file .env -f deploy/compose.production.yaml up -d --force-r
 Open `/admin#setup` and find **Posting events** above the setup forms. The list includes all events, including past simulation events, their KST windows and assigned-post counts. **Edit** fills the event form; **Save changes** updates the existing event without changing its ID or post assignments. **Cancel edit** returns the form to creation mode.
 
 The same official/simulation date rules apply to edits. A new window cannot exclude an assigned post's publication time. Events with posts cannot change from simulation to official status or vice versa. Finalized results lock all event edits. Duplicate names are rejected with a specific message. Each update records the previous and new values in the administrator audit trail. Save errors are displayed directly under the relevant form.
+
+## Editing and deleting teams and events
+
+Teams are picked from the fixed list of the six E1 teams (TEAM MCJAKEY, TEAM JAYBULL RACING, TEAM ALPINOO, TEAM HOONRARI, TEAM MEOWCEDES, TEAM RIKSTON DRIFT); the creator is free text. A team that already has a creator is disabled in the picker. Every team/creator pair and every event has **Edit** and **Delete** in Setup.
+
+Deleting asks for confirmation. It removes the pair or event, unregisters its official posts and deletes their manual observations; the tracked posts and their automatic snapshots remain in Track posts and can be registered again. The audit trail records what was deleted and how many posts were unregistered. Finalized results block all edits and deletions. API actions: `team-update`, `team-delete` (`team_id`) and `event-delete` (`event_id`).

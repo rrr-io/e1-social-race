@@ -143,6 +143,33 @@ def mutate(action, p, actor, limit=100):
             if c.execute('SELECT 1 FROM race_teams WHERE representative=?', (representative,)).fetchone():
                 raise ValueError(f'“{representative}” already represents another team. Each person can represent only one team.')
             c.execute('INSERT INTO race_teams(name,representative,base_points) VALUES(?,?,?)', (team_name, representative, integer(p.get('base_points'), True)))
+        elif action == 'team-update':
+            team_id = integer(p.get('team_id'))
+            existing = c.execute('SELECT * FROM race_teams WHERE id=?', (team_id,)).fetchone()
+            if not existing:
+                raise ValueError('Team not found. Reload the page.')
+            team_name, representative = name(p.get('name')), name(p.get('representative'))
+            if c.execute('SELECT 1 FROM race_teams WHERE name=? AND id!=?', (team_name, team_id)).fetchone():
+                raise ValueError(f'“{team_name}” already has a creator. Edit that pair instead.')
+            if c.execute('SELECT 1 FROM race_teams WHERE representative=? AND id!=?', (representative, team_id)).fetchone():
+                raise ValueError(f'“{representative}” already represents another team. Each person can represent only one team.')
+            c.execute('UPDATE race_teams SET name=?,representative=?,base_points=? WHERE id=?',
+                      (team_name, representative, integer(p.get('base_points'), True), team_id))
+            p = {'team_id': team_id, 'before': dict(existing), 'after': {'name': team_name, 'representative': representative, 'base_points': integer(p.get('base_points'), True)}}
+        elif action in ('team-delete', 'event-delete'):
+            table, column = ('race_teams', 'team_id') if action == 'team-delete' else ('race_events', 'event_id')
+            record_id = integer(p.get(column))
+            existing = c.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
+            if not existing:
+                raise ValueError('Already deleted. Reload the page.')
+            entries = [r[0] for r in c.execute(f'SELECT id FROM race_entries WHERE {column}=?', (record_id,))]
+            manual = 0
+            for entry_id in entries:
+                manual += c.execute('DELETE FROM race_manual WHERE entry_id=?', (entry_id,)).rowcount
+            c.execute(f'DELETE FROM race_entries WHERE {column}=?', (record_id,))
+            c.execute(f'DELETE FROM {table} WHERE id=?', (record_id,))
+            # Tracked posts and their snapshots stay; only the race registration goes.
+            p = {column: record_id, 'deleted': dict(existing), 'unregistered_posts': len(entries), 'deleted_manual_observations': manual}
         elif action == 'base':
             if not c.execute('UPDATE race_teams SET base_points=? WHERE id=?', (integer(p.get('base_points')), integer(p.get('team_id')))).rowcount:
                 raise ValueError('Team not found.')

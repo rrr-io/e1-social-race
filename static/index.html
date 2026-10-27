@@ -36,13 +36,13 @@
 
     <section aria-labelledby="events-heading">
       <h3 id="events-heading">Posting events</h3>
-      <p class="section-note">Assigned posts must stay inside their event window. Use Edit to rename an event or adjust its dates.</p>
+      <p class="section-note">Edit an event to rename it or move its window (assigned posts must stay inside it). Deleting an event unregisters its posts; they stay tracked.</p>
       <div class="scroll"><table><thead><tr><th>Event</th><th>Type</th><th>Opens (KST)</th><th>Closes (KST)</th><th>Posts</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="event-list"></tbody></table></div>
     </section>
 
     <section aria-labelledby="teams-heading">
       <h3 id="teams-heading">Teams &amp; creators</h3>
-      <div class="scroll"><table><thead><tr><th>Team</th><th>Creator</th><th>GP base points</th></tr></thead><tbody id="setup-teams"></tbody></table></div>
+      <div class="scroll"><table><thead><tr><th>Team</th><th>Creator</th><th>GP base points</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="setup-teams"></tbody></table></div>
     </section>
 
     <div class="forms">
@@ -50,17 +50,18 @@
         <h3 id="event-form-title">Add posting event</h3>
         <input type="hidden" name="event_id">
         <label>Event name<input name="name" required maxlength="500" autocomplete="off" placeholder="e.g. Race 1 · Opening lap"></label>
-        <label>Window opens (KST)<input name="starts" type="datetime-local" required></label>
-        <label>Window closes (KST)<input name="ends" type="datetime-local" required><small class="field-hint">Official events must fall between 28 Oct 18:00 and 8 Nov 23:59 KST.</small></label>
+        <div data-datetime="starts" data-label="Window opens (KST)"></div>
+        <div data-datetime="ends" data-label="Window closes (KST)" data-hint="Official events must fall between 28 Oct 18:00 and 8 Nov 23:59 KST."></div>
         <div class="form-actions"><button id="save-event" type="submit">Add event</button><button id="cancel-event" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
         <p class="form-message" role="status" aria-live="polite"></p>
       </form>
-      <form data-action="team">
-        <h3>Add team &amp; representative</h3>
-        <label>Team name<input name="name" required maxlength="80" autocomplete="off" placeholder="e.g. TEAM ALPINOO"></label>
-        <label>Representative name<input name="representative" required maxlength="120" autocomplete="off"><small class="field-hint">Each team has exactly one representative.</small></label>
+      <form id="team-form" data-action="team">
+        <h3 id="team-form-title">Add team &amp; creator</h3>
+        <input type="hidden" name="team_id">
+        <label>Team<select id="team-select" name="name" required></select><small class="field-hint">Each team has one creator. Teams that already have one are greyed out.</small></label>
+        <label>Creator<input name="representative" required maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Name or @handle"></label>
         <label>Grand Prix base points <span class="optional">optional</span><input name="base_points" type="number" min="0" inputmode="numeric"></label>
-        <div class="form-actions"><button type="submit">Add team</button></div>
+        <div class="form-actions"><button id="save-team" type="submit">Add team &amp; creator</button><button id="cancel-team" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
         <p class="form-message" role="status" aria-live="polite"></p>
       </form>
     </div>
@@ -130,7 +131,7 @@
         <form data-action="manual">
           <h3>Record manual counts</h3>
           <label>Official post<select name="entry_id" id="entry-options" required></select></label>
-          <label>Observed at (KST)<input name="observed_at" type="datetime-local" required></label>
+          <div data-datetime="observed_at" data-label="Observed at (KST)"></div>
           <div class="field-row">
             <label>Likes<input name="likes" type="number" min="0" inputmode="numeric"></label>
             <label>Comments<input name="comments" type="number" min="0" inputmode="numeric"></label>

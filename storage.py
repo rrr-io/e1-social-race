@@ -8,42 +8,6 @@ DB = os.getenv('DATABASE_PATH', 'data/pulse.sqlite3')
 INTERVAL = max(15, int(os.getenv('POLL_INTERVAL_MINUTES', '60'))) * 60
 
 
-# Exact messages stored by the first release. Preserve these lookup keys so
-# existing databases can be migrated to English without changing user content.
-LEGACY_ERROR_TRANSLATIONS = {
-    'Nessun contatore pubblico disponibile: login, blocco, post non supportato o dati nascosti.': (
-        'No public metrics available: sign-in required, blocked access, unsupported post or hidden data.'
-    ),
-    'API YouTube non disponibile: verifica chiave, quota e rete.': (
-        'YouTube API unavailable: check the API key, quota and network.'
-    ),
-    'Video YouTube non disponibile o privato.': (
-        'YouTube video unavailable or private.'
-    ),
-    'Timeout della piattaforma (90 secondi). Nuovo tentativo programmato.': (
-        'Platform timed out after 90 seconds. A retry has been scheduled.'
-    ),
-    'Installa le dipendenze: pip install -r requirements.txt.': (
-        'Install dependencies: pip install -r requirements.txt.'
-    ),
-    'Accesso pubblico bloccato o login richiesto dalla piattaforma. Nessun contatore aggiornato.': (
-        'Access blocked or sign-in required by the platform. No metrics were updated.'
-    ),
-    'Estrazione non riuscita: post non disponibile/non supportato, rete o extractor da aggiornare.': (
-        'Extraction failed: unavailable/unsupported post, network error or outdated extractor.'
-    ),
-    'Risposta del collector non valida.': (
-        'Invalid collector response.'
-    ),
-    'ID restituito diverso dal post richiesto.': (
-        'The returned ID does not match the requested post.'
-    ),
-    'Errore interno del collector; consulta i log del server.': (
-        'Internal collector error; check the server logs.'
-    ),
-}
-
-
 @contextmanager
 def connection():
     con = sqlite3.connect(DB, timeout=15)
@@ -78,11 +42,6 @@ def init():
         import race
         race.init(c)
         c.execute("UPDATE posts SET status='queued' WHERE status='collecting'")
-        # Translate legacy database errors; new messages are already English.
-        c.executemany(
-            "UPDATE posts SET error=? WHERE error=?",
-            [(translated, original) for original, translated in LEGACY_ERROR_TRANSLATIONS.items()],
-        )
 
 
 def rows():

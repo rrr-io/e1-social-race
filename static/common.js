@@ -137,10 +137,13 @@ function busy(button, on, label) {
   if (!button) return;
   if (on) {
     button.dataset.idleLabel = button.textContent;
+    button.dataset.busyLabel = label || button.textContent;
     if (label) button.textContent = label;
     button.disabled = true; button.setAttribute('aria-busy', 'true');
   } else {
-    if (button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
+    // Restore only if nobody relabelled the button meanwhile (e.g. a form leaving edit mode).
+    if (button.dataset.idleLabel && button.textContent === button.dataset.busyLabel) button.textContent = button.dataset.idleLabel;
+    delete button.dataset.idleLabel; delete button.dataset.busyLabel;
     button.removeAttribute('aria-busy');
   }
 }

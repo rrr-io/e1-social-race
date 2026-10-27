@@ -33,7 +33,18 @@ input,select,textarea{display:block;width:100%;margin-top:6px;font:inherit;font-
 textarea{padding:10px 12px;min-height:90px;resize:vertical}
 input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 input:user-invalid,select:user-invalid,textarea:user-invalid{border-color:var(--err)}
-input[type="datetime-local"]{color-scheme:dark}
+input[type="date"],input[type="time"]{color-scheme:dark;-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;max-width:100%;text-align:left}
+input[type="date"]::-webkit-date-and-time-value,input[type="time"]::-webkit-date-and-time-value{text-align:left;min-height:1.4em}
+input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webkit-calendar-picker-indicator{filter:invert(.8);cursor:pointer}
+.field{margin:0 0 16px}
+.field-label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.dt{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:8px}
+.dt-part{position:relative;margin:0;min-width:0}
+.dt-part span{position:absolute;left:12px;top:7px;font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--subtle);pointer-events:none}
+.dt-part input{margin:0;padding:20px 12px 6px;min-height:52px}
+.row-actions{display:flex;gap:6px;justify-content:flex-end}
+.danger-text{color:var(--err)!important}
+.danger-text:hover{border-color:var(--err)!important}
 input[type="checkbox"]{width:20px;height:20px;min-height:0;margin:0;accent-color:var(--accent);flex:none}
 .check{display:flex;gap:12px;align-items:flex-start;font-weight:400;line-height:1.5;color:var(--text)}
 .optional{font-weight:400;color:var(--subtle);margin-left:4px}
@@ -133,5 +144,7 @@ dialog::backdrop{background:#000b}
   .actions .delete{margin-left:0}
   dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0;border:0;padding:16px 16px max(16px,env(safe-area-inset-bottom))}
 }
-@media(max-width:720px){tr[data-team]{border-left:4px solid var(--team)!important}tr[data-team] td:first-child{box-shadow:none}}
+@media(max-width:720px){tr[data-team]{border-left:4px solid var(--team)!important}tr[data-team] td:first-child{box-shadow:none}
+  table.stack-table td.actions-cell{grid-column:1/-1;padding-top:4px!important}table.stack-table td.actions-cell::before{display:none}
+  .row-actions button{flex:1;min-height:var(--tap)}}
 @media(max-width:420px){.field-row{grid-template-columns:1fr}}

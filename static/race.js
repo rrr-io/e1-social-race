@@ -24,6 +24,37 @@ function options(element, items, label) {
 const kstInput = seconds => new Date((seconds + 9 * 3600) * 1000).toISOString().slice(0, 16);
 const now = () => Date.now() / 1000;
 
+// The six E1 teams: the only choices when pairing a team with its creator.
+const E1_TEAMS = ['TEAM MCJAKEY', 'TEAM JAYBULL RACING', 'TEAM ALPINOO', 'TEAM HOONRARI', 'TEAM MEOWCEDES', 'TEAM RIKSTON DRIFT'];
+const sameTeam = (a, b) => teamKey(a) !== 'other' ? teamKey(a) === teamKey(b) : String(a).toLowerCase() === String(b).toLowerCase();
+
+// Date + time pickers that post one "YYYY-MM-DDTHH:MM" (KST) value. Two small native
+// pickers behave better on phones than datetime-local, which iOS renders oddly.
+function dateTimeField(labelText, name, hintText) {
+  const field = el('div', 'field dt-field');
+  field.append(el('span', 'field-label', labelText));
+  const hidden = el('input'); hidden.type = 'hidden'; hidden.name = name;
+  const row = el('div', 'dt');
+  const date = el('input'); date.type = 'date'; date.required = true; date.setAttribute('aria-label', `${labelText}, date`);
+  const time = el('input'); time.type = 'time'; time.required = true; time.step = 60; time.setAttribute('aria-label', `${labelText}, time`);
+  for (const [input, caption] of [[date, 'Date'], [time, 'Time']]) { const part = el('label', 'dt-part'); part.append(el('span', null, caption), input); row.append(part); }
+  const sync = () => { hidden.value = date.value && time.value ? `${date.value}T${time.value.slice(0, 5)}` : ''; };
+  for (const input of [date, time]) { input.addEventListener('input', sync); input.addEventListener('change', sync); }
+  hidden.setValue = value => { date.value = value ? value.slice(0, 10) : ''; time.value = value ? value.slice(11, 16) : ''; sync(); };
+  hidden.setRange = (min, max) => {
+    if (min) date.min = min.slice(0, 10); else date.removeAttribute('min');
+    if (max) date.max = max.slice(0, 10); else date.removeAttribute('max');
+  };
+  field.append(hidden, row);
+  const hint = el('small', 'field-hint', hintText || ''); if (hintText) field.append(hint);
+  field.hint = hint;
+  return field;
+}
+function resetForm(form) {
+  form.reset();
+  form.querySelectorAll('input[type="hidden"]').forEach(input => { if (input.setValue) input.setValue(''); else if (input.name !== 'post_id') input.value = ''; });
+}
+
 // Rules -------------------------------------------------------------------
 function rulesText(weights) {
   if (!weights) return 'Rankings appear once the organisers confirm the scoring formula.';
@@ -291,10 +322,8 @@ function renderAdmin(data) {
   renderEvents(data);
   document.querySelectorAll('.team-options').forEach(select => options(select, teams, t => t.name));
   renderRegistration(data);
-  const setupTeams = $('setup-teams'); setupTeams.replaceChildren();
-  for (const team of teams) { const row = el('tr'); row.dataset.team = teamKey(team.name); cell(row, team.name); cell(row, team.representative); cell(row, team.base_points == null ? 'Not set' : fmt(team.base_points)); setupTeams.append(row); }
-  if (!teams.length) emptyRow(setupTeams, 'No teams yet. Add the first team with the form below.', 3);
-  labelCells(setupTeams.closest('table'));
+  renderSetupTeams(data, teams);
+  renderTeamSelect(teams);
   const teamName = id => teams.find(t => t.id === id)?.name || 'Unknown';
   const eventName = id => (data.available_events || data.events).find(e => e.id === id)?.name || 'Unknown';
   const entrySelect = $('entry-options');
@@ -367,16 +396,13 @@ function renderRegistration(data) {
       };
       const eventSelect = select('Event', 'event_id', data.events, e => `${e.starts < data.start ? '[TEST] ' : ''}${e.name}`);
       select('Team / creator', 'team_id', teams, t => `${t.name} / ${t.representative}`);
-      const label = el('label', null, 'Published at (KST)');
-      const published = el('input'); published.type = 'datetime-local'; published.name = 'published_at'; published.required = true;
-      const hint = el('small', 'field-hint', 'Choose an event to see its publication window.');
-      label.append(published, hint); form.append(label);
+      const publishedField = dateTimeField('Published at (KST)', 'published_at', 'Choose an event to see its publication window.');
+      form.append(publishedField);
+      const published = publishedField.querySelector('input[type="hidden"]');
       eventSelect.addEventListener('change', () => {
         const selected = data.events.find(e => String(e.id) === eventSelect.value);
-        hint.textContent = selected ? `Window: ${kst(selected.starts)} – ${kst(selected.ends)} KST` : 'Choose an event to see its publication window.';
-        for (const [attribute, key] of [['min', 'starts'], ['max', 'ends']]) {
-          if (selected) published.setAttribute(attribute, kstInput(selected[key])); else published.removeAttribute(attribute);
-        }
+        publishedField.hint.textContent = selected ? `Window: ${kst(selected.starts)} – ${kst(selected.ends)} KST` : 'Choose an event to see its publication window.';
+        published.setRange(selected && kstInput(selected.starts), selected && kstInput(selected.ends));
       });
       const save = el('button', null, 'Register post'); save.type = 'submit';
       const blocked = !teams.length || !data.events.length;
@@ -398,11 +424,55 @@ function renderRegistration(data) {
 
 function resetEventForm() {
   const form = $('event-form');
-  form.reset(); form.dataset.action = 'event';
+  resetForm(form); form.dataset.action = 'event';
   $('event-form-title').textContent = 'Add posting event';
   $('save-event').textContent = 'Add event';
   $('cancel-event').hidden = true;
 }
+
+function resetTeamForm() {
+  const form = $('team-form');
+  resetForm(form); form.dataset.action = 'team';
+  $('team-form-title').textContent = 'Add team & creator';
+  $('save-team').textContent = 'Add team & creator';
+  $('cancel-team').hidden = true;
+  if (lastData) renderTeamSelect(lastData.available_teams || lastData.teams);
+}
+
+function startEdit(form, focus) {
+  inlineMessage(form.querySelector('.form-message'), 'info', '');
+  form.scrollIntoView({block: 'center', behavior: 'smooth'});
+  focus.focus({preventScroll: true});
+}
+
+function rowActions(row, label, onEdit, onDelete) {
+  const box = el('div', 'row-actions');
+  const edit = el('button', 'btn-ghost', 'Edit'); edit.type = 'button'; edit.disabled = frozen;
+  edit.setAttribute('aria-label', `Edit ${label}`); edit.addEventListener('click', onEdit);
+  const remove = el('button', 'btn-ghost danger-text', 'Delete'); remove.type = 'button'; remove.disabled = frozen;
+  remove.setAttribute('aria-label', `Delete ${label}`); remove.addEventListener('click', () => onDelete(remove));
+  box.append(edit, remove);
+  cell(row, '', 'actions-cell').append(box);
+}
+
+async function removeRecord(button, action, payload, confirmText, done) {
+  if (!confirm(confirmText)) return;
+  busy(button, true, 'Deleting…');
+  try {
+    await request(`/api/race/${action}`, payload);
+    toast('success', ...done);
+    await load();
+    document.dispatchEvent(new Event('race-saved'));
+  } catch (error) {
+    const problem = asRequestError(error);
+    toast('error', problem.title === 'Something went wrong' ? 'Could not delete' : problem.title, problem.message);
+  } finally {
+    busy(button, false);
+    if (button.isConnected) button.disabled = frozen;
+  }
+}
+
+const postsNote = n => n ? `\n\nIts ${n} registered ${n === 1 ? 'post' : 'posts'} will leave the race. They stay in Track posts with their history, and can be registered again.` : '';
 
 function renderEvents(data) {
   const list = $('event-list'); list.replaceChildren();
@@ -412,26 +482,71 @@ function renderEvents(data) {
     cell(row, item.name);
     const typeCell = cell(row, ''); typeCell.append(el('span', item.starts < data.start ? 'chip warn' : 'chip ok', item.starts < data.start ? 'Simulation' : 'Official'));
     cell(row, kst(item.starts)); cell(row, kst(item.ends)); cell(row, fmt(item.post_count));
-    const button = el('button', 'btn-ghost', 'Edit'); button.type = 'button'; button.disabled = frozen;
-    button.setAttribute('aria-label', `Edit event ${item.name}`);
-    button.addEventListener('click', () => {
+    rowActions(row, `event ${item.name}`, () => {
       const form = $('event-form');
       form.dataset.action = 'event-update';
       form.elements.event_id.value = item.id;
       form.elements.namedItem('name').value = item.name;
-      // datetime-local must show KST regardless of the administrator's timezone.
-      form.elements.starts.value = kstInput(item.starts);
-      form.elements.ends.value = kstInput(item.ends);
+      // The pickers always show KST, whatever the administrator's timezone.
+      form.elements.starts.setValue(kstInput(item.starts));
+      form.elements.ends.setValue(kstInput(item.ends));
       $('event-form-title').textContent = `Edit “${item.name}”`;
       $('save-event').textContent = 'Save changes';
       $('cancel-event').hidden = false;
-      inlineMessage(form.querySelector('.form-message'), 'info', '');
-      form.scrollIntoView({block: 'center', behavior: 'smooth'}); form.elements.namedItem('name').focus({preventScroll: true});
-    });
-    cell(row, '').append(button); list.append(row);
+      startEdit(form, form.elements.namedItem('name'));
+    }, button => removeRecord(button, 'event-delete', {event_id: item.id},
+      `Delete the event “${item.name}”?${postsNote(item.post_count)}`,
+      ['Event deleted', `“${item.name}” was removed${item.post_count ? ` and ${item.post_count} ${item.post_count === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
+    list.append(row);
   }
   if (!events.length) emptyRow(list, 'No events yet. Add your first event with the form below.', 6);
   labelCells(list.closest('table'));
+}
+
+function renderSetupTeams(data, teams) {
+  const body = $('setup-teams'); body.replaceChildren();
+  for (const team of teams) {
+    const row = el('tr'); row.dataset.team = teamKey(team.name);
+    cell(row, team.name); cell(row, team.representative); cell(row, team.base_points == null ? 'Not set' : fmt(team.base_points));
+    const registered = (data.tracked_posts || []).filter(p => p.entry_id && p.assigned_team === team.name).length;
+    rowActions(row, `${team.name} / ${team.representative}`, () => {
+      const form = $('team-form');
+      form.dataset.action = 'team-update';
+      form.elements.team_id.value = team.id;
+      renderTeamSelect(teams);
+      $('team-select').value = E1_TEAMS.find(name => sameTeam(name, team.name)) || team.name;
+      form.elements.representative.value = team.representative;
+      form.elements.base_points.value = team.base_points ?? '';
+      $('team-form-title').textContent = `Edit ${team.name}`;
+      $('save-team').textContent = 'Save changes';
+      $('cancel-team').hidden = false;
+      startEdit(form, form.elements.representative);
+    }, button => removeRecord(button, 'team-delete', {team_id: team.id},
+      `Delete ${team.name} / ${team.representative}?${postsNote(registered)}`,
+      ['Team & creator deleted', `${team.name} / ${team.representative} was removed${registered ? ` and ${registered} ${registered === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
+    body.append(row);
+  }
+  if (!teams.length) emptyRow(body, 'No teams yet. Pick a team and add its creator with the form below.', 4);
+  labelCells(body.closest('table'));
+}
+
+// Fixed team list; teams that already have a creator are disabled (except the one being edited).
+function renderTeamSelect(teams) {
+  const select = $('team-select');
+  if (!select) return;
+  const editing = $('team-form').elements.team_id.value;
+  const previous = select.value;
+  const names = [...E1_TEAMS, ...teams.map(t => t.name).filter(n => !E1_TEAMS.some(e => sameTeam(e, n)))];
+  const blank = el('option', null, 'Choose a team'); blank.value = '';
+  select.replaceChildren(blank);
+  for (const name of names) {
+    const owner = teams.find(t => sameTeam(t.name, name));
+    const option = el('option', null, owner && String(owner.id) !== editing ? `${name} · ${owner.representative}` : name);
+    option.value = name;
+    option.disabled = Boolean(owner && String(owner.id) !== editing);
+    select.append(option);
+  }
+  select.value = names.includes(previous) && !select.querySelector(`option[value="${CSS.escape(previous)}"]`)?.disabled ? previous : '';
 }
 
 // What to say after each successful save.
@@ -442,6 +557,7 @@ function successText(action, payload, data) {
     case 'event': return ['Event added', `“${payload.name}” is ready for registrations.`];
     case 'event-update': return ['Event updated', `Changes to “${payload.name}” were saved.`];
     case 'team': return ['Team added', `${payload.name} / ${payload.representative} can now be picked when registering posts.`];
+    case 'team-update': return ['Team & creator updated', `${payload.name} / ${payload.representative}`];
     case 'weights': return ['Scoring rules confirmed', 'The standings now use the new formula.'];
     case 'base': return ['Base points saved', `${team(payload.team_id)?.name || 'The team'} now has ${fmt(Number(payload.base_points))} base points.`];
     case 'register-post': return ['Post registered', `Assigned to ${team(payload.team_id)?.name || 'the team'} · ${event(payload.event_id)?.name || 'the event'}. Its first race check is scheduled.`];
@@ -453,7 +569,7 @@ function successText(action, payload, data) {
 
 function validate(form) {
   if (form.id === 'event-form' && form.elements.starts.value && form.elements.ends.value && form.elements.ends.value <= form.elements.starts.value) {
-    return ['The window must close after it opens.', form.elements.ends];
+    return ['The window must close after it opens.', form.elements.ends.closest('.dt-field').querySelector('input[type="date"]')];
   }
   if (form.dataset.action === 'manual' && !['likes', 'comments', 'views'].some(k => form.elements[k].value !== '')) {
     return ['Enter at least one count: likes, comments or views.', form.elements.likes];
@@ -462,7 +578,9 @@ function validate(form) {
 }
 
 if (admin) {
+  document.querySelectorAll('[data-datetime]').forEach(slot => slot.replaceWith(dateTimeField(slot.dataset.label, slot.dataset.datetime, slot.dataset.hint)));
   $('cancel-event').addEventListener('click', () => { resetEventForm(); inlineMessage($('event-form').querySelector('.form-message'), 'info', ''); });
+  $('cancel-team').addEventListener('click', () => { resetTeamForm(); inlineMessage($('team-form').querySelector('.form-message'), 'info', ''); });
   document.querySelector('form[data-action="weights"]')?.addEventListener('input', event => { event.currentTarget.dataset.touched = '1'; });
   document.addEventListener('submit', async event => {
     const form = event.target;
@@ -482,7 +600,7 @@ if (admin) {
     try {
       await request(`/api/race/${action}`, payload);
       const [title, detail] = successText(action, payload, lastData);
-      if (form.id === 'event-form') resetEventForm(); else if (action !== 'register-post') form.reset();
+      if (form.id === 'event-form') resetEventForm(); else if (form.id === 'team-form') resetTeamForm(); else if (action !== 'register-post') resetForm(form);
       delete form.dataset.touched;
       inlineMessage(message, 'success', `${title}.`);
       toast('success', title, detail);
