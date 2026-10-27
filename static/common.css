@@ -13,12 +13,12 @@
 [data-team="mcjakey"]{--team:#ff8a1f}[data-team="jaybull"]{--team:#ffd23f}[data-team="alpinoo"]{--team:#ff7eb6}
 [data-team="hoonrari"]{--team:#ff3b3b}[data-team="meowcedes"]{--team:#2ee6c5}[data-team="rikston"]{--team:#4cd964}
 /* The public page takes the colours of the team in P1 (set by race.js); E1 orange otherwise. */
-body[data-leader="mcjakey"]{--accent:#ff8a1f;--accent-ink:#1f0e00;--accent-soft:#3a210c}
-body[data-leader="jaybull"]{--accent:#ffd23f;--accent-ink:#241c00;--accent-soft:#352c0a}
-body[data-leader="alpinoo"]{--accent:#ff7eb6;--accent-ink:#2a0716;--accent-soft:#3a1527}
-body[data-leader="hoonrari"]{--accent:#ff4b4b;--accent-ink:#260404;--accent-soft:#3c1414}
-body[data-leader="meowcedes"]{--accent:#2ee6c5;--accent-ink:#032520;--accent-soft:#0e3530}
-body[data-leader="rikston"]{--accent:#4cd964;--accent-ink:#04230b;--accent-soft:#103519}
+[data-leader="mcjakey"]{--accent:#ff8a1f;--accent-ink:#1f0e00;--accent-soft:#3a210c}
+[data-leader="jaybull"]{--accent:#ffd23f;--accent-ink:#241c00;--accent-soft:#352c0a}
+[data-leader="alpinoo"]{--accent:#ff7eb6;--accent-ink:#2a0716;--accent-soft:#3a1527}
+[data-leader="hoonrari"]{--accent:#ff4b4b;--accent-ink:#260404;--accent-soft:#3c1414}
+[data-leader="meowcedes"]{--accent:#2ee6c5;--accent-ink:#032520;--accent-soft:#0e3530}
+[data-leader="rikston"]{--accent:#4cd964;--accent-ink:#04230b;--accent-soft:#103519}
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .sr{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 [hidden]{display:none!important}

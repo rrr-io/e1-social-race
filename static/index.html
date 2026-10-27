@@ -42,7 +42,8 @@
 
     <section aria-labelledby="teams-heading">
       <h3 id="teams-heading">Teams &amp; creators</h3>
-      <div class="scroll"><table><thead><tr><th>Team</th><th>Creator</th><th>GP base points</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="setup-teams"></tbody></table></div>
+      <p class="section-note">One creator per team on each platform. Instagram is ranked by likes, TikTok by views.</p>
+      <div class="scroll"><table><thead><tr><th>Team</th><th>Instagram creator</th><th>TikTok creator</th><th>GP base points</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="setup-teams"></tbody></table></div>
     </section>
 
     <div class="forms">
@@ -56,30 +57,21 @@
         <p class="form-message" role="status" aria-live="polite"></p>
       </form>
       <form id="team-form" data-action="team">
-        <h3 id="team-form-title">Add team &amp; creator</h3>
+        <h3 id="team-form-title">Add team &amp; creators</h3>
         <input type="hidden" name="team_id">
-        <label>Team<select id="team-select" name="name" required></select><small class="field-hint">Each team has one creator. Teams that already have one are greyed out.</small></label>
-        <label>Creator<input name="representative" required maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Name or @handle"></label>
+        <label>Team<select id="team-select" name="name" required></select><small class="field-hint">Teams already set up are greyed out: use Edit to change them.</small></label>
+        <label>Instagram creator<input name="instagram" required maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Name or @handle"></label>
+        <label>TikTok creator<input name="tiktok" required maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Name or @handle"><small class="field-hint">Can be the same person as on Instagram.</small></label>
         <label>Grand Prix base points <span class="optional">optional</span><input name="base_points" type="number" min="0" inputmode="numeric"></label>
-        <div class="form-actions"><button id="save-team" type="submit">Add team &amp; creator</button><button id="cancel-team" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
+        <div class="form-actions"><button id="save-team" type="submit">Add team</button><button id="cancel-team" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
         <p class="form-message" role="status" aria-live="polite"></p>
       </form>
     </div>
 
     <details id="scoring-details">
-      <summary>Scoring &amp; Grand Prix points</summary>
+      <summary>Grand Prix base points</summary>
+      <p class="section-note">Scoring is fixed: Instagram posts count their likes, TikTok posts their views. Each leaderboard has its own podium (P1 2%, P2 1%, P3 1% of the team's base points).</p>
       <div class="forms">
-        <form data-action="weights">
-          <h3>Scoring rules</h3>
-          <p class="section-note">Whole points per engagement; 0 excludes a metric. Rules lock once the race starts.</p>
-          <div class="field-row">
-            <label>Per like<input name="likes" type="number" min="0" required inputmode="numeric"></label>
-            <label>Per comment<input name="comments" type="number" min="0" required inputmode="numeric"></label>
-            <label>Per view<input name="views" type="number" min="0" required inputmode="numeric"></label>
-          </div>
-          <div class="form-actions"><button type="submit">Confirm scoring rules</button></div>
-          <p class="form-message" role="status" aria-live="polite"></p>
-        </form>
         <form data-action="base">
           <h3>Grand Prix base points</h3>
           <label>Team<select name="team_id" class="team-options" required></select></label>
@@ -152,9 +144,9 @@
         </form>
       </div>
       <section>
-        <h3>Team &amp; creator standings</h3>
+        <h3>Standings by platform</h3>
         <p id="rules" class="section-note"></p>
-        <div class="scroll"><table><thead><tr><th>Rank</th><th>Team / representative</th><th>Posts</th><th>Score</th><th>GP bonus preview</th></tr></thead><tbody id="teams"></tbody></table></div>
+        <div class="scroll"><table><thead><tr><th>Leaderboard</th><th>Rank</th><th>Team / creator</th><th>Posts</th><th>Score</th><th>GP bonus preview</th></tr></thead><tbody id="teams"></tbody></table></div>
       </section>
       <section>
         <h3>Official posts</h3>
@@ -168,6 +160,13 @@
     <p class="workflow-note">A ready-to-post graphic of the current standings, event and race day. It updates with the latest data; pick a format and download.</p>
     <div class="share-layout">
       <form id="share-form" class="share-controls">
+        <fieldset>
+          <legend>Leaderboard</legend>
+          <div class="segmented two">
+            <label><input type="radio" name="board" value="instagram" checked><span>Instagram<small>likes</small></span></label>
+            <label><input type="radio" name="board" value="tiktok"><span>TikTok<small>views</small></span></label>
+          </div>
+        </fieldset>
         <fieldset>
           <legend>Format</legend>
           <div class="segmented">

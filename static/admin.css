@@ -62,3 +62,4 @@
   .share-preview{position:static;order:-1;padding:12px}
   .share-preview canvas[data-format="story"]{max-height:70vh}
 }
+.segmented.two{grid-template-columns:repeat(2,1fr)}

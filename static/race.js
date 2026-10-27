@@ -56,12 +56,11 @@ function resetForm(form) {
 }
 
 // Rules -------------------------------------------------------------------
-function rulesText(weights) {
-  if (!weights) return 'Rankings appear once the organisers confirm the scoring formula.';
-  const names = {likes: ['like', 'likes'], comments: ['comment', 'comments'], views: ['view', 'views']};
-  const parts = Object.entries(names).filter(([k]) => weights[k]).map(([k, [one]]) => `${fmt(weights[k])} ${weights[k] === 1 ? 'pt' : 'pts'} per ${one}`);
-  const ignored = Object.entries(names).filter(([k]) => !weights[k]).map(([, [, many]]) => many);
-  return `Score: ${parts.join(' · ')}${ignored.length ? ` · ${ignored.join(' and ')} don't count` : ''}.`;
+const PLATFORMS = ['instagram', 'tiktok'];
+const PLATFORM_NAME = {instagram: 'Instagram', tiktok: 'TikTok'};
+const metricOf = (data, platform) => (data.metrics || {})[platform] || (platform === 'tiktok' ? 'views' : 'likes');
+function rulesText(data) {
+  return `Instagram ranks creators by likes, TikTok by views. Each leaderboard has its own podium.`;
 }
 
 // Header / hero -----------------------------------------------------------
@@ -72,11 +71,10 @@ function renderHero(data) {
   let kind = 'accent', label = 'Live · provisional', countdown;
   if (data.state === 'Final') { kind = 'ok'; label = 'Final results'; countdown = data.finalized_at ? `Results published ${kst(data.finalized_at)} KST.` : 'Results are final.'; }
   else if (data.simulation) { kind = 'warn'; label = 'Simulation · not official'; }
-  else if (!data.weights) { kind = ''; label = 'Awaiting scoring rules'; }
   if (!countdown) {
-    if (t < data.start) { countdown = `Lights out in ${duration(data.start - t)}`; if (!data.simulation && data.weights) label = 'Starting soon'; }
+    if (t < data.start) { countdown = `Lights out in ${duration(data.start - t)}`; if (!data.simulation) label = 'Starting soon'; }
     else if (t < data.end) countdown = `Chequered flag in ${duration(data.end - t)}`;
-    else { countdown = 'Race closed · final results coming soon'; if (data.weights) { kind = 'warn'; label = 'Closed · awaiting final check'; } }
+    else { countdown = 'Race closed · final results coming soon'; kind = 'warn'; label = 'Closed · awaiting final check'; }
   }
   chip.className = `chip ${kind}`.trim();
   chip.textContent = label;
@@ -136,66 +134,80 @@ function renderOverall(data, t) {
   $('overall-end').textContent = `${kst(data.end)} KST`;
 }
 
-// The page wears the colours of the sole P1 team; ties and empty grids keep E1 orange.
+const soleLeader = rows => { const top = (rows || []).filter(r => r.rank === 1 && r.score != null); return top.length === 1 ? top[0] : null; };
+
+// Desktop stays neutral (E1 colours). On phones only one leaderboard is visible,
+// so the page takes the colours of that leaderboard's P1 team.
+const phone = window.matchMedia('(max-width: 820px)');
+const activeBoard = () => document.querySelector('.boards')?.dataset.show || 'instagram';
 function renderLeaderTheme(data) {
-  if (admin) return;
-  const leaders = (data.teams || []).filter(team => team.rank === 1 && team.score != null);
-  const leader = leaders.length === 1 ? leaders[0] : null;
-  const key = leader ? teamKey(leader.name) : 'other';
-  if (leader && key !== 'other') document.body.dataset.leader = key; else delete document.body.dataset.leader;
+  if (admin || !data) return;
+  const leaders = Object.fromEntries(PLATFORMS.map(p => [p, soleLeader(data.boards?.[p])]));
+  const shown = phone.matches ? leaders[activeBoard()] : null;
+  const key = shown ? teamKey(shown.team) : 'other';
+  if (key !== 'other') document.body.dataset.leader = key; else delete document.body.dataset.leader;
   const chip = $('leader-chip');
   if (chip) {
-    chip.hidden = !leader;
-    if (leader) { chip.textContent = `${leader.name} in P1`; chip.title = `The page uses ${leader.name}'s colours while they lead`; }
+    if (phone.matches) {
+      chip.hidden = !shown;
+      if (shown) chip.textContent = `${shown.team} · ${PLATFORM_NAME[activeBoard()]} P1`;
+    } else {
+      chip.hidden = !leaders.instagram && !leaders.tiktok;
+      chip.textContent = PLATFORMS.map(p => leaders[p] ? `${PLATFORM_NAME[p]} P1: ${leaders[p].team}` : null).filter(Boolean).join(' · ');
+    }
   }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = getComputedStyle(document.body).getPropertyValue('--accent-soft').trim() || '#0a0a0c';
 }
+phone.addEventListener?.('change', () => renderLeaderTheme(lastData));
 
-// Standings: timing tower (public) or table (admin) ------------------------
+// Standings: one timing tower per platform (public) or a table (admin) ----------------
 function renderTower(data) {
-  const tower = $('tower');
-  if (!tower) return;
-  tower.replaceChildren();
-  tower.removeAttribute('aria-busy');
-  if (!data.teams.length) {
-    const li = el('li', 'tower-empty');
-    li.append(el('strong', null, 'The grid is empty for now'), el('span', null, 'Teams appear here as soon as the organisers register them.'));
-    tower.append(li);
-    return;
-  }
-  const leader = data.teams.find(t => t.rank === 1 && t.score != null);
-  for (const team of data.teams) {
-    const li = el('li', 'tower-row');
-    li.dataset.team = teamKey(team.name);
-    if (team.rank && team.rank <= 3) li.classList.add(`podium-${team.rank}`);
-    if (team.score == null) li.classList.add('is-pending');
-    li.append(el('span', 'pos', team.rank ? `P${team.rank}` : '—'), el('span', 'team-bar'));
-    const who = el('div', 'who');
-    who.append(el('strong', null, team.name), el('span', null, `${team.representative} · ${team.posts} ${team.posts === 1 ? 'post' : 'posts'}`));
-    li.append(who);
-    const score = el('div', 'score');
-    if (team.score != null) {
-      score.append(el('strong', null, fmt(team.score)));
-      const gap = leader && team !== leader ? `−${fmt(leader.score - team.score)}` : leader ? 'Leader' : '';
-      score.append(el('span', 'gap', gap));
-    } else {
-      score.append(el('strong', 'pending', 'Pending'));
-      score.append(el('span', 'gap', !data.weights ? 'No formula yet' : team.posts ? `${team.missing} ${team.missing === 1 ? 'post' : 'posts'} awaiting counts` : 'No posts yet'));
+  for (const platform of PLATFORMS) {
+    const tower = $(`tower-${platform}`);
+    if (!tower) continue;
+    const rows = data.boards?.[platform] || [];
+    const leader = soleLeader(rows);
+    tower.replaceChildren();
+    tower.removeAttribute('aria-busy');
+    if (!rows.length) {
+      const li = el('li', 'tower-empty');
+      li.append(el('strong', null, 'The grid is empty for now'), el('span', null, `${PLATFORM_NAME[platform]} creators appear here once the organisers register them.`));
+      tower.append(li);
+      continue;
     }
-    li.append(score);
-    const bonus = el('span', 'bonus');
-    if (team.bonus_percent) {
-      bonus.classList.add('chip', 'accent');
-      bonus.textContent = `+${team.bonus_percent}%${team.bonus_points == null ? '' : ` · ${fmt(team.bonus_points)} GP`}`;
-      bonus.title = 'Grand Prix bonus preview';
-    } else if (team.rank && team.rank <= 3 && team.bonus_percent == null) {
-      bonus.classList.add('chip', 'warn'); bonus.textContent = 'Tie';
-      bonus.title = 'Tied on the podium: the bonus stays unresolved until a tie-break is agreed.';
+    const unit = metricOf(data, platform);
+    for (const row of rows) {
+      const li = el('li', 'tower-row');
+      li.dataset.team = teamKey(row.team);
+      if (row.rank && row.rank <= 3) li.classList.add(`podium-${row.rank}`);
+      if (row.score == null) li.classList.add('is-pending');
+      li.append(el('span', 'pos', row.rank ? `P${row.rank}` : '—'), el('span', 'team-bar'));
+      const who = el('div', 'who');
+      who.append(el('strong', null, row.team), el('span', null, `${row.creator || 'Creator to be announced'} · ${row.posts} ${row.posts === 1 ? 'post' : 'posts'}`));
+      li.append(who);
+      const score = el('div', 'score');
+      if (row.score != null) {
+        score.append(el('strong', null, fmt(row.score)));
+        score.append(el('span', 'gap', leader && row !== leader ? `−${fmt(leader.score - row.score)}` : leader ? `${unit} · leader` : unit));
+      } else {
+        score.append(el('strong', 'pending', row.posts ? 'Pending' : '—'));
+        score.append(el('span', 'gap', row.posts ? `${row.missing} ${row.missing === 1 ? 'post' : 'posts'} awaiting counts` : 'No posts yet'));
+      }
+      li.append(score);
+      const bonus = el('span', 'bonus');
+      if (row.bonus_percent) {
+        bonus.classList.add('chip', 'accent');
+        bonus.textContent = `+${row.bonus_percent}%${row.bonus_points == null ? '' : ` · ${fmt(row.bonus_points)} GP`}`;
+        bonus.title = 'Grand Prix bonus preview';
+      } else if (row.rank && row.rank <= 3 && row.bonus_percent == null) {
+        bonus.classList.add('chip', 'warn'); bonus.textContent = 'Tie';
+        bonus.title = 'Tied on the podium: the bonus stays unresolved until a tie-break is agreed.';
+      }
+      li.append(bonus);
+      li.setAttribute('aria-label', `${PLATFORM_NAME[platform]}: ${row.rank ? `position ${row.rank}` : 'not ranked'}, ${row.team}, ${row.creator || ''}, ${row.score != null ? `${fmt(row.score)} ${unit}` : 'score pending'}`);
+      tower.append(li);
     }
-    li.append(bonus);
-    li.setAttribute('aria-label', `${team.rank ? `Position ${team.rank}` : 'Not ranked'}, ${team.name}, ${team.score != null ? `${fmt(team.score)} points` : 'score pending'}`);
-    tower.append(li);
   }
 }
 
@@ -203,16 +215,19 @@ function renderTeamsTable(data) {
   const body = $('teams');
   if (!body) return;
   body.replaceChildren();
-  for (const team of data.teams) {
-    const row = el('tr');
-    cell(row, team.rank ? `P${team.rank}` : '—');
-    cell(row, `${team.name} / ${team.representative}`);
-    cell(row, fmt(team.posts));
-    cell(row, team.missing ? `Pending (${team.missing} incomplete)` : fmt(team.score));
-    cell(row, team.bonus_percent == null ? '—' : `${team.bonus_percent}%${team.bonus_points == null ? '' : ` · ${fmt(team.bonus_points)} points`}`);
-    body.append(row);
+  for (const platform of PLATFORMS) {
+    for (const row of data.boards?.[platform] || []) {
+      const tr = el('tr'); tr.dataset.team = teamKey(row.team);
+      cell(tr, `${PLATFORM_NAME[platform]} · ${metricOf(data, platform)}`);
+      cell(tr, row.rank ? `P${row.rank}` : '—');
+      cell(tr, `${row.team} / ${row.creator || '—'}`);
+      cell(tr, fmt(row.posts));
+      cell(tr, row.missing ? `Pending (${row.missing} incomplete)` : fmt(row.score));
+      cell(tr, row.bonus_percent == null ? '—' : `${row.bonus_percent}%${row.bonus_points == null ? '' : ` · ${fmt(row.bonus_points)} points`}`);
+      body.append(tr);
+    }
   }
-  if (!data.teams.length) emptyRow(body, 'No teams registered yet.', 5);
+  if (!body.children.length) emptyRow(body, 'No teams registered yet.', 6);
   labelCells(body.closest('table'));
 }
 
@@ -245,17 +260,19 @@ function renderEntries(data) {
     row.dataset.team = teamKey(team?.name);
     const teamCell = cell(row, '', 'team-cell');
     teamCell.append(el('span', 'dot', ''), document.createTextNode(team?.name || 'Unknown team'));
+    const creator = team?.creators?.[entry.platform];
+    if (creator) teamCell.append(el('small', 'creator', creator));
     cell(row, eventOf(entry.event_id)?.name || 'Unknown event');
     const link = el('a', 'post-link', `${entry.platform === 'tiktok' ? 'TikTok' : entry.platform === 'instagram' ? 'Instagram' : entry.platform} ↗`);
     link.href = entry.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
     link.setAttribute('aria-label', `Open the ${entry.platform} post of ${team?.name || 'this team'} (new tab)`);
     cell(row, '').append(link);
-    for (const key of ['likes', 'comments', 'views']) cell(row, fmt(entry.metrics?.[key]), 'num');
+    for (const key of ['likes', 'comments', 'views']) cell(row, fmt(entry.metrics?.[key]), key === entry.metric ? 'num counted' : 'num');
     cell(row, fmt(entry.score), 'num strong');
     cell(row, entry.observed_at ? kst(entry.observed_at) : '—');
     const source = cell(row, '');
     if (!entry.metrics) { row.classList.add('is-missing'); source.append(el('span', 'chip warn', 'Awaiting counts')); }
-    else if (entry.score == null && data.weights) source.append(el('span', 'chip warn', `${entry.source} · incomplete`));
+    else if (entry.score == null) source.append(el('span', 'chip warn', `${entry.source} · no ${metricOf(data, entry.platform)}`));
     else { source.append(el('span', entry.source === 'manual' ? 'chip accent' : 'chip', entry.source)); if (entry.source !== 'manual') source.classList.add('src-auto'); }
     body.append(row);
   }
@@ -283,8 +300,7 @@ function showLoadError(error, {stale}) {
     banner.append(retry);
   }
   if (!lastData) {
-    const tower = $('tower');
-    if (tower) {
+    for (const tower of document.querySelectorAll('.tower')) {
       tower.removeAttribute('aria-busy');
       const li = el('li', 'tower-empty');
       li.append(el('strong', null, 'Standings unavailable'), el('span', null, 'They will appear here as soon as the server responds.'));
@@ -304,7 +320,7 @@ async function load() {
   lastData = data; lastLoadedAt = Date.now();
   frozen = data.state === 'Final';
   if ($('status')) $('status').textContent = `${data.state} · Opens ${kst(data.start)} KST · Closes ${kst(data.end)} KST`;
-  if ($('rules')) $('rules').textContent = rulesText(data.weights);
+  if ($('rules')) $('rules').textContent = rulesText(data);
   renderHero(data); renderTower(data); renderTeamsTable(data); renderEntries(data);
   if ($('refreshed')) $('refreshed').textContent = `Checked for updates at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} (your time) · refreshes every minute.`;
   if (admin) renderAdmin(data);
@@ -336,8 +352,6 @@ function renderAdmin(data) {
     details.append(summary, el('pre', null, text)); audit.append(details);
   }
   if (!data.audit.length) audit.append(el('p', null, 'No changes recorded yet.'));
-  const weightsForm = document.querySelector('form[data-action="weights"]');
-  if (weightsForm && data.weights && !weightsForm.dataset.touched) for (const k of ['likes', 'comments', 'views']) weightsForm.elements[k].value = data.weights[k];
   renderChecklist(data, teams);
   if (frozen) document.querySelectorAll('form[data-action] button').forEach(button => { button.disabled = true; });
 }
@@ -347,8 +361,9 @@ function renderChecklist(data, teams) {
   if (!list) return;
   const events = data.available_events || data.events;
   const items = [
-    [Boolean(data.weights), data.weights ? 'Scoring rules confirmed' : 'Confirm the scoring rules', data.weights ? rulesText(data.weights) : 'Rankings stay hidden until you do.', 'scoring-details'],
-    [teams.length > 0, `${teams.length} ${teams.length === 1 ? 'team' : 'teams'}`, teams.length ? (n => n ? `${n} without GP base points` : 'All have GP base points')(teams.filter(t => t.base_points == null).length) : 'Add each team and its representative.', 'teams-heading'],
+    [teams.length > 0 && teams.every(t => PLATFORMS.every(p => t.creators?.[p])), `${teams.length} ${teams.length === 1 ? 'team' : 'teams'}`,
+      teams.length ? (n => n ? `${n} missing a creator` : 'Instagram and TikTok creator for each')(teams.filter(t => !PLATFORMS.every(p => t.creators?.[p])).length) : 'Add each team with its Instagram and TikTok creator.', 'teams-heading'],
+    [teams.length > 0 && teams.every(t => t.base_points != null), 'GP base points', teams.length ? (n => n ? `${n} ${n === 1 ? 'team' : 'teams'} without base points` : 'Set for every team')(teams.filter(t => t.base_points == null).length) : 'Needed for the bonus preview.', 'scoring-details'],
     [events.length > 0, `${events.length} posting ${events.length === 1 ? 'event' : 'events'}`, events.length ? 'Edit windows below if needed.' : 'Add the scheduled posting events.', 'events-heading'],
     [data.entries.length > 0, `${data.entries.length} registered ${data.entries.length === 1 ? 'post' : 'posts'}`, 'Track posts, then register them.', null],
   ];
@@ -362,7 +377,6 @@ function renderChecklist(data, teams) {
     li.append(body);
     return li;
   }));
-  if (!data.weights && $('scoring-details')) $('scoring-details').open = true;
 }
 
 function renderRegistration(data) {
@@ -391,11 +405,12 @@ function renderRegistration(data) {
         const wrapper = el('label', null, labelText);
         const input = el('select'); input.name = name; input.required = true;
         options(input, items, label);
-        const blank = el('option', null, `Choose ${labelText.toLowerCase()}`); blank.value = ''; input.prepend(blank); input.value = '';
+        const blank = el("option", null, `Choose ${labelText.replace(/^\w/, c => c.toLowerCase())}`); blank.value = ''; input.prepend(blank); input.value = '';
         wrapper.append(input); form.append(wrapper); return input;
       };
       const eventSelect = select('Event', 'event_id', data.events, e => `${e.starts < data.start ? '[TEST] ' : ''}${e.name}`);
-      select('Team / creator', 'team_id', teams, t => `${t.name} / ${t.representative}`);
+      const teamSelect = select(`Team / ${PLATFORM_NAME[post.platform]} creator`, 'team_id', teams, t => `${t.name} / ${t.creators?.[post.platform] || `no ${PLATFORM_NAME[post.platform]} creator`}`);
+      teams.forEach((t, i) => { if (!t.creators?.[post.platform]) teamSelect.options[i + 1].disabled = true; });
       const publishedField = dateTimeField('Published at (KST)', 'published_at', 'Choose an event to see its publication window.');
       form.append(publishedField);
       const published = publishedField.querySelector('input[type="hidden"]');
@@ -433,8 +448,8 @@ function resetEventForm() {
 function resetTeamForm() {
   const form = $('team-form');
   resetForm(form); form.dataset.action = 'team';
-  $('team-form-title').textContent = 'Add team & creator';
-  $('save-team').textContent = 'Add team & creator';
+  $('team-form-title').textContent = 'Add team & creators';
+  $('save-team').textContent = 'Add team';
   $('cancel-team').hidden = true;
   if (lastData) renderTeamSelect(lastData.available_teams || lastData.teams);
 }
@@ -507,26 +522,29 @@ function renderSetupTeams(data, teams) {
   const body = $('setup-teams'); body.replaceChildren();
   for (const team of teams) {
     const row = el('tr'); row.dataset.team = teamKey(team.name);
-    cell(row, team.name); cell(row, team.representative); cell(row, team.base_points == null ? 'Not set' : fmt(team.base_points));
+    cell(row, team.name);
+    for (const platform of PLATFORMS) { const td = cell(row, team.creators?.[platform] || 'Missing'); if (!team.creators?.[platform]) td.classList.add('missing'); }
+    cell(row, team.base_points == null ? 'Not set' : fmt(team.base_points));
     const registered = (data.tracked_posts || []).filter(p => p.entry_id && p.assigned_team === team.name).length;
-    rowActions(row, `${team.name} / ${team.representative}`, () => {
+    const who = `${team.name} (${PLATFORMS.map(p => team.creators?.[p]).filter(Boolean).join(' / ')})`;
+    rowActions(row, team.name, () => {
       const form = $('team-form');
       form.dataset.action = 'team-update';
       form.elements.team_id.value = team.id;
       renderTeamSelect(teams);
       $('team-select').value = E1_TEAMS.find(name => sameTeam(name, team.name)) || team.name;
-      form.elements.representative.value = team.representative;
+      for (const platform of PLATFORMS) form.elements[platform].value = team.creators?.[platform] || '';
       form.elements.base_points.value = team.base_points ?? '';
       $('team-form-title').textContent = `Edit ${team.name}`;
       $('save-team').textContent = 'Save changes';
       $('cancel-team').hidden = false;
-      startEdit(form, form.elements.representative);
+      startEdit(form, form.elements.instagram);
     }, button => removeRecord(button, 'team-delete', {team_id: team.id},
-      `Delete ${team.name} / ${team.representative}?${postsNote(registered)}`,
-      ['Team & creator deleted', `${team.name} / ${team.representative} was removed${registered ? ` and ${registered} ${registered === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
+      `Delete ${who} and both its creators?${postsNote(registered)}`,
+      ['Team deleted', `${who} was removed${registered ? ` and ${registered} ${registered === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
     body.append(row);
   }
-  if (!teams.length) emptyRow(body, 'No teams yet. Pick a team and add its creator with the form below.', 4);
+  if (!teams.length) emptyRow(body, 'No teams yet. Pick a team and add its creators with the form below.', 5);
   labelCells(body.closest('table'));
 }
 
@@ -541,7 +559,7 @@ function renderTeamSelect(teams) {
   select.replaceChildren(blank);
   for (const name of names) {
     const owner = teams.find(t => sameTeam(t.name, name));
-    const option = el('option', null, owner && String(owner.id) !== editing ? `${name} · ${owner.representative}` : name);
+    const option = el('option', null, owner && String(owner.id) !== editing ? `${name} · already set up` : name);
     option.value = name;
     option.disabled = Boolean(owner && String(owner.id) !== editing);
     select.append(option);
@@ -556,9 +574,8 @@ function successText(action, payload, data) {
   switch (action) {
     case 'event': return ['Event added', `“${payload.name}” is ready for registrations.`];
     case 'event-update': return ['Event updated', `Changes to “${payload.name}” were saved.`];
-    case 'team': return ['Team added', `${payload.name} / ${payload.representative} can now be picked when registering posts.`];
-    case 'team-update': return ['Team & creator updated', `${payload.name} / ${payload.representative}`];
-    case 'weights': return ['Scoring rules confirmed', 'The standings now use the new formula.'];
+    case 'team': return ['Team added', `${payload.name}: Instagram ${payload.instagram} · TikTok ${payload.tiktok}.`];
+    case 'team-update': return ['Team updated', `${payload.name}: Instagram ${payload.instagram} · TikTok ${payload.tiktok}.`];
     case 'base': return ['Base points saved', `${team(payload.team_id)?.name || 'The team'} now has ${fmt(Number(payload.base_points))} base points.`];
     case 'register-post': return ['Post registered', `Assigned to ${team(payload.team_id)?.name || 'the team'} · ${event(payload.event_id)?.name || 'the event'}. Its first race check is scheduled.`];
     case 'manual': return ['Observation saved', payload.final ? 'Certified final counts recorded.' : 'The manual counts were added to the history.'];
@@ -581,7 +598,6 @@ if (admin) {
   document.querySelectorAll('[data-datetime]').forEach(slot => slot.replaceWith(dateTimeField(slot.dataset.label, slot.dataset.datetime, slot.dataset.hint)));
   $('cancel-event').addEventListener('click', () => { resetEventForm(); inlineMessage($('event-form').querySelector('.form-message'), 'info', ''); });
   $('cancel-team').addEventListener('click', () => { resetTeamForm(); inlineMessage($('team-form').querySelector('.form-message'), 'info', ''); });
-  document.querySelector('form[data-action="weights"]')?.addEventListener('input', event => { event.currentTarget.dataset.touched = '1'; });
   document.addEventListener('submit', async event => {
     const form = event.target;
     if (!form.matches('form[data-action]')) return;
@@ -618,6 +634,12 @@ if (admin) {
   document.addEventListener('posts-changed', () => refresh());
 }
 
+// Phone tabs between the two leaderboards.
+document.querySelectorAll('.board-tabs [data-board]').forEach(tab => tab.addEventListener('click', () => {
+  document.querySelectorAll('.board-tabs [data-board]').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+  const boards = document.querySelector('.boards'); if (boards) boards.dataset.show = tab.dataset.board;
+  renderLeaderTheme(lastData);
+}));
 $('team-filter')?.addEventListener('change', () => lastData && renderEntries(lastData));
 $('event-filter')?.addEventListener('change', () => lastData && renderEntries(lastData));
 

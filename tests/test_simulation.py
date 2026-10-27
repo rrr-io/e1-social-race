@@ -36,9 +36,8 @@ class Simulation(unittest.TestCase):
             race.mutate('event', {**self.event, 'ends': '2026-10-29T00:00'}, 'admin')
 
     def test_tracking_now_and_exclusion_when_disabled(self):
-        race.mutate('team', {'name': 'Test team', 'representative': 'Test creator'}, 'admin')
+        race.mutate('team', {'name': 'Test team', 'instagram': 'Test creator', 'tiktok': 'Test TT'}, 'admin')
         race.mutate('event', self.event, 'admin')
-        race.mutate('weights', {'likes': 1, 'comments': 1, 'views': 0}, 'admin')
         entry = {'team_id': 1, 'event_id': 1, 'url': 'https://www.instagram.com/p/TEST/', 'published_at': '2026-10-26T18:00'}
         race.mutate('entry', entry, 'admin')
         post = storage.claim()
@@ -46,7 +45,7 @@ class Simulation(unittest.TestCase):
         storage.finish(post, data={'likes': 10, 'comments': 2, 'views': None, 'title': 'Test', 'source': 'test collector'})
         board = race.read()
         self.assertTrue(board['simulation'])
-        self.assertEqual(board['teams'][0]['score'], 12)
+        self.assertEqual(board['boards']['instagram'][0]['score'], 10)
         self.assertEqual(storage.rows()[0]['next_check'], race.timestamp('2026-10-26T22:00'))
         with patch.dict(os.environ, {'RACE_SIMULATION': 'false'}):
             board = race.read()
@@ -54,6 +53,7 @@ class Simulation(unittest.TestCase):
             self.assertEqual(board['entries'], [])
             self.assertEqual(board['events'], [])
             self.assertEqual(board['teams'], [])
+            self.assertEqual(board['boards'], {'instagram': [], 'tiktok': []})
             self.assertEqual(len(race.read(admin=True)['available_teams']), 1)
             self.assertEqual(len(storage.rows()), 1)
             with self.assertRaisesRegex(ValueError, 'simulation event'):
@@ -62,7 +62,7 @@ class Simulation(unittest.TestCase):
             self.assertEqual(race.read()['entries'], [])
 
     def test_simulation_event_widening_and_no_conversion(self):
-        race.mutate('team', {'name': 'Jay', 'representative': 'Min'}, 'admin')
+        race.mutate('team', {'name': 'Jay', 'instagram': 'Min', 'tiktok': 'Min TT'}, 'admin')
         race.mutate('event', {'name': 'Short test', 'starts': '2026-10-26T18:50', 'ends': '2026-10-26T18:51'}, 'admin')
         race.mutate('entry', {'team_id': 1, 'event_id': 1, 'url': 'https://www.instagram.com/p/TEST/', 'published_at': '2026-10-26T18:51'}, 'admin')
         race.mutate('event-update', {'event_id': 1, 'name': 'Longer test', 'starts': '2026-10-25T00:00', 'ends': '2026-10-27T23:59'}, 'admin')

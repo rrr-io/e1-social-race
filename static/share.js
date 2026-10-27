@@ -42,6 +42,7 @@ function options() {
   const form = $('share-form');
   return {
     format: form.elements.format.value,
+    board: form.elements.board.value,
     theme: form.elements.theme.value,
     kicker: form.elements.kicker.value.trim(),
     scores: form.elements.scores.checked,
@@ -53,7 +54,9 @@ function options() {
 
 // Race facts ------------------------------------------------------------------
 function facts(d, now) {
-  const teams = d.teams || [];
+  // One leaderboard per image: Instagram (likes) or TikTok (views).
+  const board = options().board;
+  const teams = (d.boards?.[board] || []).map(r => ({...r, name: r.team, representative: r.creator || ''}));
   const leaders = teams.filter(t => t.rank === 1 && t.score != null);
   const leader = leaders.length === 1 ? leaders[0] : null;
   const total = Math.ceil((d.end - d.start) / 86400);
@@ -71,8 +74,10 @@ function facts(d, now) {
   else if (events.length) eventLine = 'All posting events closed';
   else eventLine = 'Posting events coming soon';
   const observed = (d.entries || []).map(e => e.observed_at).filter(Boolean);
-  const status = d.state === 'Final' ? 'FINAL RESULTS' : d.simulation ? 'SIMULATION' : !d.weights ? 'AWAITING RULES' : now < d.start ? 'PRE-RACE' : now > d.end ? 'AWAITING FINAL CHECK' : 'PROVISIONAL';
-  return {teams, leader, total, dayLabel, dayValue, eventLine, status,
+  const status = d.state === 'Final' ? 'FINAL RESULTS' : d.simulation ? 'SIMULATION' : now < d.start ? 'PRE-RACE' : now > d.end ? 'AWAITING FINAL CHECK' : 'PROVISIONAL';
+  const metric = ((d.metrics || {})[board] || (board === 'tiktok' ? 'views' : 'likes')).toUpperCase();
+  const boardLabel = `${board === 'tiktok' ? 'TIKTOK' : 'INSTAGRAM'} · ${metric}`;
+  return {teams, leader, boardLabel, total, dayLabel, dayValue, eventLine, status,
     progress: Math.min(Math.max((now - d.start) / (d.end - d.start), 0), 1),
     asOf: observed.length ? `Counts as of ${kst(Math.max(...observed))} KST` : `Generated ${kst(now)} KST`};
 }
@@ -139,7 +144,7 @@ function hero(ctx, L, accent, f, o) {
   const s = L.s, {x, y, w, big} = L.hero;
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   ctx.fillStyle = accent; ctx.font = font(24 * s, 800);
-  spaced(ctx, (o.kicker || 'ENHYPEN MAMA GRAND PRIX').toUpperCase(), x, y, 5 * s);
+  spaced(ctx, (o.kicker ? `${o.kicker} · ${f.boardLabel}` : `${f.boardLabel} LEADERBOARD`).toUpperCase(), x, y, 5 * s);
   // "DAY 6/12": label and value share a baseline, value huge.
   const baseline = y + big * 0.98;
   ctx.fillStyle = alpha('#ffffff', 0.55);
@@ -199,8 +204,8 @@ function rows(ctx, L, accent, ink, f, o) {
       const showGap = o.gaps && t.score != null;
       const scoreY = showGap ? y + h * 0.42 : y + h / 2;
       if (t.score != null) { ctx.fillStyle = '#ffffff'; ctx.font = font(h * 0.40, 800, MONO); ctx.fillText(fmt(t.score), right, scoreY); }
-      else { ctx.fillStyle = '#ffc547'; ctx.font = font(h * 0.30, 800); ctx.fillText('PENDING', right, y + h / 2); }
-      scoreW = ctx.measureText(t.score != null ? fmt(t.score) : 'PENDING').width;
+      else { ctx.fillStyle = '#ffc547'; ctx.font = font(h * 0.30, 800); ctx.fillText(t.posts ? 'PENDING' : 'NO POSTS', right, y + h / 2); }
+      scoreW = ctx.measureText(t.score != null ? fmt(t.score) : t.posts ? 'PENDING' : 'NO POSTS').width;
       if (showGap) {
         ctx.fillStyle = isP1 ? accent : '#8a8a96'; ctx.font = font(h * 0.21, 700, MONO);
         ctx.fillText(isP1 ? 'LEADER' : leaderScore != null ? `−${fmt(leaderScore - t.score)}` : '', right, y + h * 0.75);
@@ -287,7 +292,7 @@ function draw() {
 function filename() {
   const o = options();
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  return `e1-social-grid-race-${stamp}-${o.format}.png`;
+  return `e1-social-grid-race-${o.board}-${stamp}-${o.format}.png`;
 }
 
 function toBlob() {

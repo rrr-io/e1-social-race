@@ -79,12 +79,13 @@ class HTTP(unittest.TestCase):
         self.assertEqual(self.request('/common.css', auth=False)[0], 200)
         self.assertEqual(self.request('/race-admin', auth=False)[0], 401)
         self.assertEqual(self.request('/api/race/admin', auth=False)[0], 401)
-        self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'}, auth=False)[0], 401)
-        self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'}, origin='https://evil.test')[0], 403)
-        self.assertEqual(self.request('/api/race/team', {'name':'Team','representative':'Person'})[0], 200)
+        self.assertEqual(self.request('/api/race/team', {'name':'Team','instagram':'Person','tiktok':'Person TT'}, auth=False)[0], 401)
+        self.assertEqual(self.request('/api/race/team', {'name':'Team','instagram':'Person','tiktok':'Person TT'}, origin='https://evil.test')[0], 403)
+        self.assertEqual(self.request('/api/race/team', {'name':'Team','instagram':'Person','tiktok':'Person TT'})[0], 200)
         public = json.loads(self.request('/api/race', auth=False)[1])
         self.assertNotIn('audit', public)
-        self.assertEqual(public['teams'][0]['representative'], 'Person')
+        self.assertEqual(public['teams'][0]['creators'], {'instagram': 'Person', 'tiktok': 'Person TT'})
+        self.assertEqual(public['boards']['instagram'][0]['creator'], 'Person')
 
     def test_two_pages_and_legacy_redirects(self):
         import http.client

@@ -18,8 +18,8 @@ Each creator's score is the sum of their official posts' latest cumulative engag
 ## Setup
 
 1. Open `/admin#setup` using the existing administrator credentials.
-2. Confirm the agreed integer weights for likes, comments and views. Zero excludes a metric. No formula is preselected; rankings remain unavailable until configured. Shares/reposts are not collected in this release. Weights are locked after the race begins once configured.
-3. Add teams and their representatives. Representative names are unique, case-insensitively; enter each person's identity consistently.
+2. Scoring is fixed: Instagram posts score their likes and TikTok posts their views (see *Two leaderboards* below). There are no weights to configure.
+3. Add each team with its Instagram creator and its TikTok creator. A creator name can be used once per platform (case-insensitive); the same person may cover both platforms of one team.
 4. Add the scheduled posting events and their KST publication windows.
 5. In **Track posts**, add the canonical Instagram or TikTok link and a post name. In **Register posts**, find that tracked post and choose an existing event and team/creator. Enter the actual publication time in KST. The admin must verify ownership, hashtags, theme and eligibility. Registration reuses the existing tracker record and snapshots; it does not create another post.
 6. Inspect the tracker for collection failures. Record manual counts when necessary, including observation time and an evidence reference or correction reason. Blank metrics are unknown, not zero. Corrections append records rather than overwrite history. Automatic observations with a later actual timestamp supersede manual observations in the provisional standings.
@@ -96,3 +96,20 @@ The same official/simulation date rules apply to edits. A new window cannot excl
 Teams are picked from the fixed list of the six E1 teams (TEAM MCJAKEY, TEAM JAYBULL RACING, TEAM ALPINOO, TEAM HOONRARI, TEAM MEOWCEDES, TEAM RIKSTON DRIFT); the creator is free text. A team that already has a creator is disabled in the picker. Every team/creator pair and every event has **Edit** and **Delete** in Setup.
 
 Deleting asks for confirmation. It removes the pair or event, unregisters its official posts and deletes their manual observations; the tracked posts and their automatic snapshots remain in Track posts and can be registered again. The audit trail records what was deleted and how many posts were unregistered. Finalized results block all edits and deletions. API actions: `team-update`, `team-delete` (`team_id`) and `event-delete` (`event_id`).
+
+## Two leaderboards
+
+Each team has exactly one Instagram creator and one TikTok creator. There are two independent leaderboards:
+
+- **Instagram**: a creator's score is the sum of the latest like counts of their official Instagram posts.
+- **TikTok**: a creator's score is the sum of the latest view counts of their official TikTok posts.
+
+Other metrics are still collected and shown, but do not count. A post without the scored metric leaves its creator unranked ("Pending") until the count arrives. Creators with no posts yet are listed but not ranked.
+
+Each leaderboard has its own podium: P1 earns 2%, P2 and P3 earn 1% of the team's Grand Prix base points. A team can collect bonuses from both; the API returns each team's `bonus_points_total`. Ties on a podium block finalization on that leaderboard.
+
+A post can only be registered to a team that has a creator on that post's platform. One post per platform per team per event is allowed.
+
+API: `team` and `team-update` take `name`, `instagram`, `tiktok` and optional `base_points`. The public response contains `boards.instagram`, `boards.tiktok` (ranked rows with `team`, `creator`, `posts`, `score`, `rank`, `bonus_percent`, `bonus_points`) and `metrics` (`{"instagram": "likes", "tiktok": "views"}`). The `weights` action no longer exists.
+
+Upgrading an existing database: on startup, `race_teams.representative` is removed and that person becomes the team's creator on **both** platforms. Teams, events, registrations, manual observations and snapshots are kept. Check Setup afterwards and change the creators where needed. Back up the database before deploying.

@@ -148,3 +148,5 @@ dialog::backdrop{background:#000b}
   table.stack-table td.actions-cell{grid-column:1/-1;padding-top:4px!important}table.stack-table td.actions-cell::before{display:none}
   .row-actions button{flex:1;min-height:var(--tap)}}
 @media(max-width:420px){.field-row{grid-template-columns:1fr}}
+
+td.missing{color:var(--warn);font-weight:650}

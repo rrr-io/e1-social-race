@@ -22,6 +22,8 @@ def connection():
 
 def init():
     Path(DB).parent.mkdir(parents=True, exist_ok=True)
+    import race
+    race.migrate(DB)
     with connection() as c:
         c.execute('PRAGMA journal_mode=WAL')
         c.executescript('''

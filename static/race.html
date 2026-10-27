@@ -46,11 +46,21 @@
       <h2 id="standings-heading" tabindex="-1">Standings</h2>
       <p id="rules" class="rules"></p>
     </div>
-    <ol id="tower" class="tower" aria-busy="true" aria-describedby="rules">
-      <li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li>
-      <li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li>
-    </ol>
-    <p class="footnote">Podium bonus: P1 gets 2%, P2 and P3 get 1% of the team's Grand Prix base points. Teams with a post still awaiting counts are not ranked yet. Ties are left unresolved.</p>
+    <div class="board-tabs" role="tablist" aria-label="Leaderboard">
+      <button type="button" role="tab" aria-selected="true" data-board="instagram">Instagram</button>
+      <button type="button" role="tab" aria-selected="false" data-board="tiktok">TikTok</button>
+    </div>
+    <div class="boards" data-show="instagram">
+      <div class="board" data-platform="instagram">
+        <div class="board-head"><h3>Instagram</h3><span class="metric">ranked by likes</span></div>
+        <ol id="tower-instagram" class="tower" aria-busy="true" aria-label="Instagram leaderboard"><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li></ol>
+      </div>
+      <div class="board" data-platform="tiktok">
+        <div class="board-head"><h3>TikTok</h3><span class="metric">ranked by views</span></div>
+        <ol id="tower-tiktok" class="tower" aria-busy="true" aria-label="TikTok leaderboard"><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li></ol>
+      </div>
+    </div>
+    <p class="footnote">Each team has one creator per platform. On each leaderboard, P1 earns 2% and P2 and P3 earn 1% of the team's Grand Prix base points, so a team can collect bonuses from both. Creators with a post still awaiting counts are not ranked yet. Ties are left unresolved.</p>
   </section>
 
   <section aria-labelledby="posts-heading">
@@ -61,10 +71,10 @@
         <label><span class="sr">Filter by event</span><select id="event-filter"><option value="">All events</option></select></label>
       </div>
     </div>
-    <p class="footnote">Each post counts with its latest total, not the sum of daily checks. Missing counts are never treated as zero. Times are in KST.</p>
+    <p class="footnote">Instagram posts score their likes, TikTok posts their views (highlighted). Each post counts with its latest total, not the sum of daily checks. Missing counts are never treated as zero. Times are in KST.</p>
     <div class="scroll">
       <table id="entries-table">
-        <thead><tr><th>Team</th><th>Event</th><th>Post</th><th class="num">Likes</th><th class="num">Comments</th><th class="num">Views</th><th class="num">Score</th><th>Counted (KST)</th><th>Source</th></tr></thead>
+        <thead><tr><th>Team / creator</th><th>Event</th><th>Post</th><th class="num">Likes</th><th class="num">Comments</th><th class="num">Views</th><th class="num">Score</th><th>Counted (KST)</th><th>Source</th></tr></thead>
         <tbody id="entries"></tbody>
       </table>
     </div>
