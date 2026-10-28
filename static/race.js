@@ -161,6 +161,28 @@ function renderLeaderTheme(data) {
 }
 phone.addEventListener?.('change', () => renderLeaderTheme(lastData));
 
+// Only show leaderboards that have registered posts. Before any post exists
+// on either platform, both stay visible as an empty grid.
+function showBoardsWithPosts(data) {
+  const boards = document.querySelector('.boards');
+  if (!boards || admin) return;
+  const live = PLATFORMS.filter(p => (data.entries || []).some(e => e.platform === p));
+  const visible = live.length ? live : PLATFORMS;
+  for (const platform of PLATFORMS) {
+    const board = boards.querySelector(`.board[data-platform="${platform}"]`);
+    if (board) board.hidden = !visible.includes(platform);
+  }
+  boards.classList.toggle('single', visible.length === 1);
+  const tabs = document.querySelector('.board-tabs');
+  if (tabs) tabs.hidden = visible.length === 1;
+  if (!visible.includes(boards.dataset.show)) {
+    boards.dataset.show = visible[0];
+    document.querySelectorAll('.board-tabs [data-board]').forEach(t => t.setAttribute('aria-selected', String(t.dataset.board === visible[0])));
+  }
+  const rules = $('rules');
+  if (rules && visible.length === 1) rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once its first post is registered.`;
+}
+
 // Standings: one timing tower per platform (public) or a table (admin) ----------------
 function renderTower(data) {
   for (const platform of PLATFORMS) {
@@ -321,6 +343,7 @@ async function load() {
   frozen = data.state === 'Final';
   if ($('status')) $('status').textContent = `${data.state} · Opens ${kst(data.start)} KST · Closes ${kst(data.end)} KST`;
   if ($('rules')) $('rules').textContent = rulesText(data);
+  showBoardsWithPosts(data);
   renderHero(data); renderTower(data); renderTeamsTable(data); renderEntries(data);
   if ($('refreshed')) $('refreshed').textContent = `Checked for updates at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} (your time) · refreshes every minute.`;
   if (admin) renderAdmin(data);

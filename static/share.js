@@ -25,6 +25,7 @@ const alpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba($
 const fmt = n => new Intl.NumberFormat('en-GB').format(n);
 const dayFmt = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: 'numeric', month: 'short'});
 const day = s => dayFmt.format(new Date(s * 1000)).toUpperCase();
+const snapshotFmt = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 
 function fit(ctx, text, maxWidth, size, weight, family = SANS, italic = false, min = 0.55) {
   let s = size;
@@ -82,7 +83,8 @@ function facts(d, now) {
   const boardLabel = `${board === 'tiktok' ? 'TIKTOK' : 'INSTAGRAM'} · ${metric}`;
   return {teams, leader, boardLabel, total, dayLabel, dayValue, eventLine, status,
     progress: Math.min(Math.max((now - d.start) / (d.end - d.start), 0), 1),
-    asOf: observed.length ? `Counts as of ${kst(Math.max(...observed))} KST` : `Generated ${kst(now)} KST`};
+    snapshot: snapshotFmt.format(new Date(now * 1000)).replace(',', '').toUpperCase(),
+    asOf: observed.length ? `Counts as of ${kst(Math.max(...observed))} KST` : 'No counts yet'};
 }
 
 // Layouts -----------------------------------------------------------------------
@@ -90,17 +92,17 @@ function layout(format, W, H) {
   const s = W / 1080;
   if (format === 'landscape') {
     const sl = H / 900;
-    return {s: sl, pad: 64 * sl, header: 64 * sl, hero: {x: 64 * sl, y: 190 * sl, w: 560 * sl, big: 150 * sl},
+    return {s: sl, pad: 64 * sl, header: 64 * sl, hero: {x: 64 * sl, y: 190 * sl, w: 560 * sl, big: 110 * sl},
       rows: {x: 680 * sl, y: 150 * sl, w: W - 680 * sl - 64 * sl, bottom: H - 150 * sl, maxH: 96 * sl},
       bar: {x: 64 * sl, y: H - 104 * sl, w: W - 128 * sl}, footer: H - 52 * sl};
   }
   if (format === 'story') {
-    return {s, pad: 72 * s, header: 120 * s, hero: {x: 72 * s, y: 330 * s, w: W - 144 * s, big: 210 * s},
-      rows: {x: 72 * s, y: 720 * s, w: W - 144 * s, bottom: H - 300 * s, maxH: 140 * s},
+    return {s, pad: 72 * s, header: 120 * s, hero: {x: 72 * s, y: 380 * s, w: W - 144 * s, big: 156 * s},
+      rows: {x: 72 * s, y: 700 * s, w: W - 144 * s, bottom: H - 300 * s, maxH: 140 * s},
       bar: {x: 72 * s, y: H - 220 * s, w: W - 144 * s}, footer: H - 120 * s};
   }
-  return {s, pad: 64 * s, header: 64 * s, hero: {x: 64 * s, y: 196 * s, w: W - 128 * s, big: 132 * s},
-    rows: {x: 64 * s, y: 410 * s, w: W - 128 * s, bottom: H - 158 * s, maxH: 86 * s},
+  return {s, pad: 64 * s, header: 64 * s, hero: {x: 64 * s, y: 196 * s, w: W - 128 * s, big: 98 * s},
+    rows: {x: 64 * s, y: 372 * s, w: W - 128 * s, bottom: H - 158 * s, maxH: 86 * s},
     bar: {x: 64 * s, y: H - 112 * s, w: W - 128 * s}, footer: H - 52 * s};
 }
 
@@ -144,6 +146,10 @@ function header(ctx, W, L, accent, ink, f) {
   ctx.strokeStyle = alpha(accent, 0.6); ctx.lineWidth = 2 * s; ctx.stroke();
   ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(px + 22 * s, py + ph / 2, 6 * s, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#f4f4f6'; spaced(ctx, label, px + 38 * s, py + ph / 2 + 1, 2 * s);
+  // Snapshot stamp: when this image was made (KST).
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.font = font(17 * s, 800, MONO); ctx.fillStyle = '#c4c4cc';
+  ctx.fillText(`SNAPSHOT · ${f.snapshot} KST`, W - L.pad, py + ph + 26 * s);
 }
 
 function hero(ctx, L, accent, f, o) {
@@ -297,7 +303,9 @@ function draw() {
 
 function filename() {
   const o = options();
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  // Snapshot time in KST, e.g. 2026-11-02_2310-KST
+  const k = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
+  const stamp = `${k.slice(0, 10)}_${k.slice(11, 13)}${k.slice(14, 16)}-KST`;
   return `e1-social-grid-race-${o.board}-${stamp}-${o.format}.png`;
 }
 

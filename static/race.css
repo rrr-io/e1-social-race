@@ -167,3 +167,6 @@ td.counted{color:var(--text);font-weight:750;text-decoration:underline;text-deco
   .board-head{border-bottom-width:1px}
   #entries-table.stack-table .team-cell .creator{margin-left:0}
 }
+.boards.single{grid-template-columns:1fr;max-width:760px}
+.boards.single .board:not([hidden]){display:block!important}
+.board[hidden]{display:none!important}
