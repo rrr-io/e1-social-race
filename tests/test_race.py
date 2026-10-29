@@ -86,15 +86,16 @@ class Race(unittest.TestCase):
         self.assertEqual(self.row(IG)['rank'], 1)
 
     def test_schedule_and_failed_collection_preserve_counts(self):
-        self.assertEqual(race.next_check(race.START), race.timestamp('2026-10-28T22:00'))
-        self.assertEqual(race.next_check(race.timestamp('2026-11-08T22:01')), race.END)
+        self.assertEqual(race.next_check(race.START), race.timestamp('2026-10-28T19:00'))
+        self.assertEqual(race.next_check(race.timestamp('2026-10-30T13:20')), race.timestamp('2026-10-30T14:00'))
+        self.assertEqual(race.next_check(race.timestamp('2026-11-08T23:30')), race.END)
         self.assertGreater(race.next_check(race.END), race.END)
         self.manual()
         with storage.connection() as c:
             post = dict(c.execute('SELECT * FROM posts').fetchone())
         storage.finish(post, error='Challenge')
         self.assertEqual(self.row()['score'], 10)
-        self.assertEqual(storage.rows()[0]['next_check'], race.timestamp('2026-10-28T22:00'))
+        self.assertEqual(storage.rows()[0]['next_check'], race.timestamp('2026-10-28T20:00'))
 
     def test_final_cutoff_and_freeze(self):
         self.manual()
@@ -214,6 +215,56 @@ class Race(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Tracked post not found'):
             race.mutate('register-post', {**payload, 'post_id': 999}, 'admin')
         self.assertNotIn('tracked_posts', race.read())
+
+
+class Schedule(unittest.TestCase):
+    setUp = Race.setUp
+    tearDown = Race.tearDown
+
+    def test_old_daily_schedule_is_brought_forward_on_startup(self):
+        with storage.connection() as c:
+            c.execute('UPDATE posts SET next_check=?', (race.timestamp('2026-10-29T22:00'),))
+        storage.init()
+        self.assertEqual(storage.rows()[0]['next_check'], race.timestamp('2026-10-28T20:00'))
+
+    def test_interval_is_configurable(self):
+        with patch.object(race, 'CHECK_MINUTES', 30):
+            self.assertEqual(race.next_check(race.timestamp('2026-10-30T13:10')), race.timestamp('2026-10-30T13:30'))
+        with patch.object(race, 'CHECK_MINUTES', 360):
+            self.assertEqual(race.next_check(race.timestamp('2026-10-30T13:10')), race.timestamp('2026-10-30T18:00'))
+
+
+class RefreshAll(unittest.TestCase):
+    setUp = Race.setUp
+    tearDown = Race.tearDown
+
+    def test_queues_registered_posts_skips_recent_and_paused(self):
+        race.mutate('event', {'name': 'Lap 2', 'starts': '2026-10-28T18:00', 'ends': '2026-10-28T23:00'}, 'admin')
+        race.mutate('entry', {**self.entry, 'event_id': 2, 'url': 'https://www.instagram.com/p/LAP2/'}, 'admin')
+        race.mutate('entry', {**self.entry, 'url': 'https://www.tiktok.com/@c/video/1234567890123456789'}, 'admin')
+        now = race.START + 3600
+        with storage.connection() as c:
+            c.execute("UPDATE posts SET status='ok', last_attempt=? WHERE id=1", (now - 60,))     # fresh
+            c.execute("UPDATE posts SET status='ok', last_attempt=? WHERE id=2", (now - 3600,))   # stale
+            c.execute("UPDATE posts SET paused=1 WHERE id=3")
+            # A tracked post that is not in the race is never touched.
+            c.execute("INSERT INTO posts(platform,remote_id,url,created_at,next_check,status) VALUES('youtube','abcdefghijk','https://youtu.be/abcdefghijk',0,9999999999,'ok')")
+        result = race.mutate('refresh-all', {}, 'admin')
+        self.assertEqual([q['id'] for q in result['queued']], [2])
+        self.assertEqual(result['queued'][0]['last_attempt'], now - 3600)
+        self.assertEqual((result['recent'], result['paused']), ([1], [3]))
+        with storage.connection() as c:
+            rows = {r['id']: (r['next_check'], r['status']) for r in c.execute('SELECT id,next_check,status FROM posts')}
+        self.assertEqual(rows[2], (0, 'queued'))
+        self.assertNotEqual(rows[1][0], 0)
+        self.assertEqual(rows[4], (9999999999, 'ok'))
+        self.assertEqual(storage.claim()['id'], 2)
+
+    def test_nothing_to_refresh(self):
+        with storage.connection() as c:
+            c.execute('UPDATE posts SET paused=1')
+        with self.assertRaisesRegex(ValueError, 'paused'):
+            race.mutate('refresh-all', {}, 'admin')
 
 
 class Management(unittest.TestCase):

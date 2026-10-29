@@ -46,7 +46,7 @@ class Simulation(unittest.TestCase):
         board = race.read()
         self.assertTrue(board['simulation'])
         self.assertEqual(board['boards']['instagram'][0]['score'], 10)
-        self.assertEqual(storage.rows()[0]['next_check'], race.timestamp('2026-10-26T22:00'))
+        self.assertEqual(storage.rows()[0]['next_check'], race.timestamp('2026-10-26T20:00'))
         with patch.dict(os.environ, {'RACE_SIMULATION': 'false'}):
             board = race.read()
             self.assertFalse(board['simulation'])

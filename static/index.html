@@ -99,7 +99,7 @@
         <button type="submit">+ Track post</button>
       </form>
       <div id="tracker-message" role="status" aria-live="polite"></div>
-      <p class="hint">Instagram and TikTok posts can then be registered for the race. Standard checks run <span id="interval">every 60 minutes</span>; registered race posts are checked daily at 22:00 KST.</p>
+      <p class="hint">Instagram and TikTok posts can then be registered for the race. Standard checks run <span id="interval">every 60 minutes</span>; registered race posts are checked every hour (on the hour, KST).</p>
     </section>
 
     <section aria-labelledby="posts-heading">
@@ -153,7 +153,7 @@
       </section>
       <section>
         <h3>Official posts</h3>
-        <p class="section-note">Scores use the latest cumulative counts, never the sum of daily snapshots. Missing data is not zero.</p>
+        <p class="section-note">Scores use the latest cumulative counts, never the sum of snapshots. Missing data is not zero.</p>
         <div class="scroll"><table><thead><tr><th>Team</th><th>Event</th><th>Post</th><th>Likes</th><th>Comments</th><th>Views</th><th>Score</th><th>Counted (KST)</th><th>Source</th></tr></thead><tbody id="entries"></tbody></table></div>
       </section>
     </details>
@@ -163,6 +163,16 @@
     <p class="workflow-note">A ready-to-post graphic of the current standings, event and race day. It updates with the latest data; pick a format and download.</p>
     <div class="share-layout">
       <form id="share-form" class="share-controls">
+        <div class="refresh-box">
+          <div class="refresh-head">
+            <div><strong>Counts</strong><span id="refresh-age" class="field-hint">Loading…</span></div>
+            <button id="refresh-all" class="btn-ghost" type="button">↻ Refresh all counts</button>
+          </div>
+          <div id="refresh-progress" class="refresh-progress" hidden>
+            <div class="bar"><span id="refresh-fill"></span></div>
+            <p id="refresh-text" class="field-hint" role="status" aria-live="polite"></p>
+          </div>
+        </div>
         <fieldset>
           <legend>Leaderboard</legend>
           <div class="segmented two">

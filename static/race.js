@@ -83,7 +83,9 @@ function renderHero(data) {
   renderOverall(data, t);
   renderLeaderTheme(data);
   const observed = (data.entries || []).map(e => e.observed_at).filter(Boolean);
-  if ($('latest-line')) $('latest-line').textContent = `Counts are taken daily at 22:00 KST${observed.length ? `; latest ${kst(Math.max(...observed))} KST` : ''}.`;
+  const every = data.check_minutes || 60;
+  const cadence = every === 60 ? 'every hour' : every % 60 ? `every ${every} minutes` : `every ${every / 60} hours`;
+  if ($('latest-line')) $('latest-line').textContent = `Counts are collected ${cadence}${observed.length ? `; latest ${kst(Math.max(...observed))} KST` : ''}.`;
 }
 
 const dayFormat = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: 'numeric', month: 'short'});

@@ -103,13 +103,32 @@ def rank_rows(rows):
     return rows
 
 
+# A race post collected this recently counts as current for "refresh all".
+REFRESH_FRESH_SECONDS = 5 * 60
+
+# How often registered race posts are collected (minutes, aligned to the KST clock).
+CHECK_MINUTES = max(15, int(os.getenv('RACE_CHECK_MINUTES', '60')))
+
+
 def next_check(now):
-    """Daily 22:00 KST observations and a final cutoff attempt; never backdate."""
-    local = datetime.fromtimestamp(now if simulation_enabled() else max(now, START - 1), KST)
-    due = local.replace(hour=22, minute=0, second=0, microsecond=0)
-    if due.timestamp() <= now:
-        due += timedelta(days=1)
-    return min(due.timestamp(), END) if now < END else 253402214400.0
+    """Next scheduled observation: every CHECK_MINUTES on the KST clock, plus a final
+    attempt at the cutoff. Never backdated; nothing before the race unless simulating."""
+    if now >= END:
+        return 253402214400.0
+    base = now if simulation_enabled() else max(now, START - 1)
+    step = CHECK_MINUTES * 60
+    local = datetime.fromtimestamp(base, KST)
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    due = midnight + ((base - midnight) // step + 1) * step
+    return min(due, END)
+
+
+def reschedule(c, now=None):
+    """Bring forward race posts scheduled later than the current cadence allows
+    (e.g. after shortening the interval or upgrading from the daily schedule)."""
+    now = time.time() if now is None else now
+    due = next_check(now)
+    c.execute('UPDATE posts SET next_check=? WHERE paused=0 AND next_check>? AND id IN (SELECT post_id FROM race_entries)', (due, due))
 
 
 def timestamp(value):
@@ -173,7 +192,7 @@ def board(c, final=False):
     for team in teams:
         bonus = [row['bonus_points'] for p in PLATFORMS for row in boards[p] if row['team_id'] == team['id'] and row['bonus_points']]
         team['bonus_points_total'] = sum(bonus) if bonus else None
-    return {'start': START, 'end': END, 'metrics': SCORE_METRIC, 'simulation': simulation,
+    return {'start': START, 'end': END, 'metrics': SCORE_METRIC, 'check_minutes': CHECK_MINUTES, 'simulation': simulation,
             'state': 'SIMULATION — not official results' if simulation else 'Provisional',
             'teams': teams, 'boards': boards, 'entries': entries,
             'events': [dict(r) for r in c.execute('SELECT * FROM race_events WHERE starts>=? OR ? ORDER BY starts', (START, simulation))]}
@@ -329,7 +348,26 @@ def mutate(action, p, actor, limit=100):
             result['state'] = 'Final'
             result['finalized_at'] = now
             c.execute('UPDATE race_config SET frozen=? WHERE id=1', (json.dumps(result),))
+        elif action == 'refresh-all':
+            # Queue every registered race post for an immediate collection. Posts checked
+            # in the last few minutes are already current; paused posts stay paused.
+            queued, recent, paused = [], [], []
+            for r in c.execute('SELECT p.id,p.paused,p.status,p.last_attempt FROM race_entries e JOIN posts p ON p.id=e.post_id ORDER BY e.id'):
+                if r['paused']:
+                    paused.append(r['id'])
+                elif r['status'] == 'collecting' or r['status'] == 'queued' and r['last_attempt'] is None:
+                    queued.append({'id': r['id'], 'last_attempt': r['last_attempt']})
+                elif r['last_attempt'] and now - r['last_attempt'] < REFRESH_FRESH_SECONDS and r['status'] in ('ok', 'partial'):
+                    recent.append(r['id'])
+                else:
+                    queued.append({'id': r['id'], 'last_attempt': r['last_attempt']})
+            for item in queued:
+                c.execute("UPDATE posts SET next_check=0,status=CASE WHEN status='collecting' THEN status ELSE 'queued' END WHERE id=?", (item['id'],))
+            if not queued and not recent:
+                raise ValueError('There are no registered race posts to refresh.' if not paused else 'All registered race posts are paused. Resume them in Track posts first.')
+            response = {'ok': True, 'queued': queued, 'recent': recent, 'paused': paused}
+            p = {'queued': [q['id'] for q in queued], 'recent': recent, 'paused': paused}
         else:
             raise ValueError('Unknown race action.')
         c.execute('INSERT INTO race_audit(recorded_at,actor,action,details) VALUES(?,?,?,?)', (now, actor, action, json.dumps(p)))
-    return {'ok': True}
+    return response if action == 'refresh-all' else {'ok': True}

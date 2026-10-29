@@ -28,9 +28,9 @@ An official post cannot be deleted through the tracker. This MVP does not offer 
 
 ## Observation schedule and outages
 
-Registered race posts are scheduled at 22:00 KST daily and for one final attempt at the cutoff. The existing single worker processes posts sequentially, with collection time and spacing between posts. Consequently, 22:00 is the scheduled start, not a guarantee of simultaneous snapshots. Observations retain their actual collection time. Manual refresh remains available in the tracker with its existing rate limit. Non-race posts retain their usual polling interval.
+Registered race posts are collected every hour, on the hour (KST), plus one final attempt at the cutoff. Set `RACE_CHECK_MINUTES` in `.env` to change the interval (minimum 15; e.g. 360 for every 6 hours); on startup, posts scheduled later than the new interval allows are brought forward. The single worker processes posts sequentially with about 10 seconds between them, so the hour is the scheduled start, not a guarantee of simultaneous snapshots. Observations retain their actual collection time. Manual refresh remains available in the tracker with its existing rate limit. Non-race posts retain their usual polling interval.
 
-A failed race collection retains the previous observation and schedules the next daily attempt. It does not retry hourly. Paused posts stay paused. After downtime an overdue attempt runs when the worker is available; missed historical counts cannot be reconstructed. The UI displays the last observation time. A team with missing required metrics has no score; other provisional ranks are not guaranteed final.
+A failed race collection retains the previous observation and is retried at the next scheduled slot. Paused posts stay paused. After downtime an overdue attempt runs when the worker is available; missed historical counts cannot be reconstructed. The UI displays the last observation time. A team with missing required metrics has no score; other provisional ranks are not guaranteed final.
 
 Cookies and automatic extraction remain subject to platform access restrictions. This extension does not fix bot challenges or guarantee automatic counts. Manual entry is a first-class fallback. Manual observations are stored in `race_manual` and the race audit, separately from automatic `snapshots`; the legacy per-post CSV exports automatic observations only.
 
@@ -72,7 +72,7 @@ Legacy `/race` and `/race-admin` links redirect to `/` and `/admin#race`. The he
 
 ## Pre-race simulation
 
-Set `RACE_SIMULATION=true` in the server `.env` and recreate the container to allow test events entirely before 28 October 2026 at 18:00 KST. Official date limits remain unchanged. Mixed test/official windows are rejected. Register a real Instagram or TikTok post whose actual publication time falls within the test event. The first test collection is queued immediately; later checks follow 22:00 KST, with the existing manual Refresh available in Post monitoring. An already paused tracker record must be resumed.
+Set `RACE_SIMULATION=true` in the server `.env` and recreate the container to allow test events entirely before 28 October 2026 at 18:00 KST. Official date limits remain unchanged. Mixed test/official windows are rejected. Register a real Instagram or TikTok post whose actual publication time falls within the test event. The first test collection is queued immediately; later checks follow the hourly schedule, with the existing manual Refresh available in Post monitoring. An already paused tracker record must be resumed.
 
 The leaderboard is labelled **SIMULATION — not official results** while this mode is active. It uses real platform requests, so cookies and platform blocks still apply. Manual input remains available. This is not a separate database: test posts and observations remain stored and visible in the authenticated tracker.
 
@@ -113,3 +113,7 @@ A post can only be registered to a team that has a creator on that post's platfo
 API: `team` and `team-update` take `name`, `instagram`, `tiktok` and optional `base_points`. The public response contains `boards.instagram`, `boards.tiktok` (ranked rows with `team`, `creator`, `posts`, `score`, `rank`, `bonus_percent`, `bonus_points`) and `metrics` (`{"instagram": "likes", "tiktok": "views"}`). The `weights` action no longer exists.
 
 Upgrading an existing database: on startup, `race_teams.representative` is removed and that person becomes the team's creator on **both** platforms. Teams, events, registrations, manual observations and snapshots are kept. Check Setup afterwards and change the creators where needed. Back up the database before deploying.
+
+## Refresh all counts before a snapshot
+
+The admin **Share** tab has **Refresh all counts**. It queues every registered race post for an immediate collection (API: `POST /api/race/refresh-all`), shows the worker's progress, then reloads the standings so the share image uses the newest numbers. Posts collected in the last 5 minutes count as current and are skipped; paused posts stay paused. Failed collections keep their previous counts and are listed in Track posts. The worker collects one post at a time about 10 seconds apart, so a full refresh takes roughly 15–30 seconds per post. The box turns amber when the latest counts are more than 30 minutes old.

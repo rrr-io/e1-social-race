@@ -317,6 +317,7 @@ $('share-form').addEventListener('input', draw);
 $('share-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (!data) { toast('error', 'No data yet', 'Wait for the race data to load, then try again.'); return; }
+  if (refreshing) toast('info', 'Refresh in progress', 'This image uses the counts collected so far.');
   try {
     draw();
     const url = URL.createObjectURL(await toBlob());
@@ -343,7 +344,86 @@ if (copy) {
   });
 }
 
-document.addEventListener('race-loaded', event => { data = event.detail; draw(); });
+document.addEventListener('race-loaded', event => { data = event.detail; draw(); updateAge(); });
+
+// Refresh all counts -------------------------------------------------------------
+// Queues every registered post for an immediate collection, follows the worker's
+// progress, then reloads the standings so the snapshot uses the newest numbers.
+const STALE_MINUTES = 30;
+const refreshButton = $('refresh-all');
+let refreshing = false;
+
+function latestObservation() {
+  const observed = (data?.entries || []).map(e => e.observed_at).filter(Boolean);
+  return observed.length ? Math.max(...observed) : null;
+}
+function updateAge() {
+  const box = refreshButton?.closest('.refresh-box');
+  if (!box || refreshing) return;
+  const latest = latestObservation();
+  const age = latest ? (Date.now() / 1000 - latest) / 60 : null;
+  $('refresh-age').textContent = latest == null ? 'No counts collected yet.'
+    : age < 1 ? 'Latest counts: just now.'
+    : `Latest counts: ${kst(latest)} KST (${age < 60 ? `${Math.round(age)} min` : `${Math.floor(age / 60)} h ${Math.round(age % 60)} min`} ago).`;
+  box.classList.toggle('is-stale', latest == null || age > STALE_MINUTES);
+}
+setInterval(updateAge, 60000);
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function refreshAll() {
+  if (refreshing) return;
+  refreshing = true;
+  const {request, asRequestError, busy} = window.E1;
+  const progress = $('refresh-progress'), text = $('refresh-text'), fill = $('refresh-fill');
+  busy(refreshButton, true, 'Refreshing…');
+  progress.hidden = false; progress.classList.remove('has-errors');
+  fill.style.width = '0%'; text.textContent = 'Queuing posts…';
+  try {
+    const result = await request('/api/race/refresh-all', {});
+    const pending = new Map(result.queued.map(q => [q.id, q.last_attempt]));
+    const total = pending.size;
+    const skipped = [result.recent.length && `${result.recent.length} already up to date`, result.paused.length && `${result.paused.length} paused`].filter(Boolean).join(', ');
+    let done = 0, failed = 0;
+    // The worker collects one post at a time, about 10 s apart, so allow ~1 min per post.
+    const deadline = Date.now() + Math.max(2, total) * 60000;
+    while (pending.size && Date.now() < deadline) {
+      text.textContent = `Collecting ${done + 1 > total ? total : done + 1} of ${total}…${skipped ? ` (${skipped})` : ''}`;
+      fill.style.width = `${Math.round(done / Math.max(total, 1) * 100)}%`;
+      await sleep(3000);
+      const {posts} = await request('/api/posts');
+      for (const post of posts) {
+        if (!pending.has(post.id)) continue;
+        const finished = post.status !== 'queued' && post.status !== 'collecting' && post.last_attempt && post.last_attempt !== pending.get(post.id);
+        if (finished) { pending.delete(post.id); done++; if (post.status === 'error') failed++; }
+      }
+    }
+    fill.style.width = '100%';
+    document.dispatchEvent(new Event('posts-changed'));  // race.js reloads standings, then redraws
+    if (pending.size) {
+      progress.classList.add('has-errors');
+      text.textContent = `${done} of ${total} refreshed; ${pending.size} still in the queue. The snapshot uses what is available now.`;
+      toast('info', 'Refresh still running', `${pending.size} ${pending.size === 1 ? 'post is' : 'posts are'} still queued. Check again in a minute.`);
+    } else if (failed) {
+      progress.classList.add('has-errors');
+      text.textContent = `${total - failed} of ${total} refreshed. ${failed} failed and ${failed === 1 ? 'keeps its' : 'keep their'} previous counts (see Track posts).`;
+      toast('error', 'Some counts could not be refreshed', `${failed} ${failed === 1 ? 'post keeps its' : 'posts keep their'} previous counts. Details in Track posts.`);
+    } else {
+      text.textContent = total ? `All ${total} ${total === 1 ? 'post' : 'posts'} refreshed${skipped ? ` (${skipped})` : ''}. The snapshot is up to date.` : `Nothing to collect: ${skipped}.`;
+      toast('success', 'Counts refreshed', 'The snapshot now uses the latest numbers.');
+    }
+  } catch (error) {
+    const problem = asRequestError(error);
+    progress.classList.add('has-errors');
+    text.textContent = problem.message;
+    toast('error', problem.title, problem.message);
+  } finally {
+    refreshing = false;
+    busy(refreshButton, false); refreshButton.disabled = false;
+    setTimeout(updateAge, 1500);
+  }
+}
+refreshButton?.addEventListener('click', refreshAll);
 // Redraw when the tab becomes visible so "Day N" and the event are current.
 addEventListener('hashchange', () => { if (location.hash === '#share') draw(); });
 })();
