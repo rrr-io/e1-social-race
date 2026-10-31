@@ -164,12 +164,14 @@ def teams_with_creators(c):
 def unregister(c, column, value):
     """Remove race registrations (and their manual observations) by team, event or creator.
     The tracked posts and their automatic snapshots stay. Returns (entries, manual) counts."""
-    entries = [r[0] for r in c.execute(f'SELECT id FROM race_entries WHERE {column}=?', (value,))]
+    rows = c.execute(f'SELECT id,post_id FROM race_entries WHERE {column}=?', (value,)).fetchall()
     manual = 0
-    for entry_id in entries:
+    for entry_id, post_id in rows:
         manual += c.execute('DELETE FROM race_manual WHERE entry_id=?', (entry_id,)).rowcount
+        # Back to ordinary tracking (a post of a closed event was no longer scheduled).
+        c.execute('UPDATE posts SET next_check=? WHERE id=? AND paused=0', (time.time() + storage.INTERVAL, post_id))
     c.execute(f'DELETE FROM race_entries WHERE {column}=?', (value,))
-    return len(entries), manual
+    return len(rows), manual
 
 
 def parse_creators(c, p, team_id):
@@ -406,7 +408,7 @@ def read(admin=False):
             close_events(c)
         result = json.loads(frozen) if frozen else board(c)
         if admin:
-            result['tracked_posts'] = [dict(r) for r in c.execute('SELECT p.id,p.url,p.label,p.title,p.remote_id,p.platform,e.id AS entry_id,t.name AS assigned_team,cr.name AS assigned_creator,e.creator_id AS assigned_creator_id,ev.name AS assigned_event FROM posts p LEFT JOIN race_entries e ON e.post_id=p.id LEFT JOIN race_teams t ON t.id=e.team_id LEFT JOIN race_creators cr ON cr.id=e.creator_id LEFT JOIN race_events ev ON ev.id=e.event_id ORDER BY p.created_at DESC,p.id DESC')]
+            result['tracked_posts'] = [dict(r) for r in c.execute('SELECT p.id,p.url,p.label,p.title,p.remote_id,p.platform,e.id AS entry_id,t.name AS assigned_team,cr.name AS assigned_creator,e.creator_id AS assigned_creator_id,e.published_at AS assigned_published_at,ev.name AS assigned_event FROM posts p LEFT JOIN race_entries e ON e.post_id=p.id LEFT JOIN race_teams t ON t.id=e.team_id LEFT JOIN race_creators cr ON cr.id=e.creator_id LEFT JOIN race_events ev ON ev.id=e.event_id ORDER BY p.created_at DESC,p.id DESC')]
             result['available_events'] = [dict(r) for r in c.execute('SELECT ev.*, count(e.id) AS post_count, r.frozen_at AS saved_at FROM race_events ev LEFT JOIN race_entries e ON e.event_id=ev.id LEFT JOIN race_event_results r ON r.event_id=ev.id GROUP BY ev.id ORDER BY ev.starts,ev.id')]
             result['available_teams'] = teams_with_creators(c)
             result['audit'] = [dict(r) for r in c.execute('SELECT * FROM race_audit ORDER BY id DESC LIMIT 100')]
@@ -479,6 +481,15 @@ def mutate(action, p, actor, limit=100):
             c.execute(f'DELETE FROM {table} WHERE id=?', (record_id,))
             # Tracked posts and their snapshots stay; only the race registration goes.
             p = {column: record_id, 'deleted': dict(existing), 'unregistered_posts': entries, 'deleted_manual_observations': manual}
+        elif action == 'entry-delete':
+            # Unregister one post: it leaves the race (and its event) but stays tracked.
+            entry = c.execute('SELECT e.*,cr.name AS creator,t.name AS team,ev.name AS event,p.url FROM race_entries e JOIN posts p ON p.id=e.post_id '
+                              'LEFT JOIN race_creators cr ON cr.id=e.creator_id LEFT JOIN race_teams t ON t.id=e.team_id '
+                              'LEFT JOIN race_events ev ON ev.id=e.event_id WHERE e.id=?', (integer(p.get('entry_id')),)).fetchone()
+            if not entry:
+                raise ValueError('This post is no longer registered. Reload the page.')
+            _, manual = unregister(c, 'id', entry['id'])
+            p = {'unregistered': dict(entry), 'deleted_manual_observations': manual}
         elif action == 'base':
             if not c.execute('UPDATE race_teams SET base_points=? WHERE id=?', (integer(p.get('base_points')), integer(p.get('team_id')))).rowcount:
                 raise ValueError('Team not found.')
@@ -501,9 +512,13 @@ def mutate(action, p, actor, limit=100):
                 assigned = c.execute('SELECT count(*) FROM race_entries WHERE event_id=?', (event_id,)).fetchone()[0]
                 if assigned and (existing['starts'] < START) != (starts < START):
                     raise ValueError('An event with assigned posts cannot switch between simulation and official competition.')
-                outside = c.execute('SELECT count(*) FROM race_entries WHERE event_id=? AND (published_at<? OR published_at>?)', (event_id, starts, ends)).fetchone()[0]
+                outside = c.execute('SELECT cr.name,e.platform,e.published_at FROM race_entries e LEFT JOIN race_creators cr ON cr.id=e.creator_id '
+                                    'WHERE e.event_id=? AND (e.published_at<? OR e.published_at>?) ORDER BY e.published_at', (event_id, starts, ends)).fetchall()
                 if outside:
-                    raise ValueError(f'This window would exclude {outside} assigned post(s). Keep their publication times inside the event window.')
+                    listed = '; '.join(f'{r["name"] or "?"} ({PLATFORM_LABEL.get(r["platform"], r["platform"])}, published {datetime.fromtimestamp(r["published_at"], KST):%d %b %H:%M} KST)' for r in outside[:5])
+                    more = f' and {len(outside) - 5} more' if len(outside) > 5 else ''
+                    raise ValueError(f'This window would leave out {len(outside)} registered post{"s" if len(outside) > 1 else ""}: {listed}{more}. '
+                                     'Unregister them in Register first (you can register them again afterwards), or keep their publication times inside the window.')
                 c.execute('UPDATE race_events SET name=?,starts=?,ends=? WHERE id=?', (event_name, starts, ends, event_id))
                 if (existing['starts'], existing['ends']) != (starts, ends):
                     # The window changed: the saved result is recalculated at the (new) close.
@@ -560,7 +575,7 @@ def mutate(action, p, actor, limit=100):
             else:
                 pid = post['id']
             if c.execute('SELECT 1 FROM race_entries WHERE post_id=?', (pid,)).fetchone():
-                raise ValueError('This post is already registered. It cannot be assigned to another event or team.')
+                raise ValueError('This post is already registered. To move it, unregister it in Register first.')
             c.execute('INSERT INTO race_entries(team_id,creator_id,event_id,post_id,platform,published_at) VALUES(?,?,?,?,?,?)', (team, creator['id'], event, pid, target.platform, published))
             due = now if ev['starts'] < START else post_next_check(c, pid, now)
             c.execute('UPDATE posts SET next_check=? WHERE id=?', (due, pid))

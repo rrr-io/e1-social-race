@@ -472,6 +472,15 @@ function renderRegistration(data) {
     card.append(head, link);
     if (post.entry_id) {
       card.append(el('p', 'assignment', `${post.assigned_event} · ${post.assigned_team} / ${post.assigned_creator}`));
+      if (post.assigned_published_at) card.append(el('p', 'field-hint', `Published ${kst(post.assigned_published_at)} KST`));
+      // Unregister: the post leaves its event (e.g. to change the event window or fix the
+      // assignment) and stays in Track posts, ready to be registered again.
+      const unregister = el('button', 'btn-ghost danger-text unregister', 'Unregister'); unregister.type = 'button'; unregister.disabled = frozen;
+      unregister.setAttribute('aria-label', `Unregister ${post.label || post.title || 'this post'} from ${post.assigned_event}`);
+      unregister.addEventListener('click', () => removeRecord(unregister, 'entry-delete', {entry_id: post.entry_id},
+        `Unregister this post from “${post.assigned_event}”?\n\nIt leaves the race and the event's standings, and its manual counts are deleted. It stays in Track posts with its history and can be registered again (also with a different event, creator or publication time).`,
+        ['Post unregistered', `It left “${post.assigned_event}” and is back in the list to register.`], 'Unregistering…'));
+      card.append(unregister);
     } else if (!['instagram', 'tiktok'].includes(post.platform)) {
       card.append(el('p', null, 'Only Instagram and TikTok posts can join the race.'));
     } else {
@@ -605,9 +614,9 @@ function rowActions(row, label, onEdit, onDelete) {
   cell(row, '', 'actions-cell').append(box);
 }
 
-async function removeRecord(button, action, payload, confirmText, done) {
+async function removeRecord(button, action, payload, confirmText, done, busyText = 'Deleting…') {
   if (!confirm(confirmText)) return;
-  busy(button, true, 'Deleting…');
+  busy(button, true, busyText);
   try {
     await request(`/api/race/${action}`, payload);
     toast('success', ...done);
@@ -615,7 +624,7 @@ async function removeRecord(button, action, payload, confirmText, done) {
     document.dispatchEvent(new Event('race-saved'));
   } catch (error) {
     const problem = asRequestError(error);
-    toast('error', problem.title === 'Something went wrong' ? 'Could not delete' : problem.title, problem.message);
+    toast('error', problem.title === 'Something went wrong' ? (action === 'entry-delete' ? 'Could not unregister' : 'Could not delete') : problem.title, problem.message);
   } finally {
     busy(button, false);
     if (button.isConnected) button.disabled = frozen;

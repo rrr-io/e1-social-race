@@ -106,6 +106,10 @@ Teams are picked from the fixed list of the six E1 teams (TEAM MCJAKEY, TEAM JAY
 
 Deleting asks for confirmation. It removes the pair or event, unregisters its official posts and deletes their manual observations; the tracked posts and their automatic snapshots remain in Track posts and can be registered again. The audit trail records what was deleted and how many posts were unregistered. Finalized results block all edits and deletions. API actions: `team-update`, `team-delete` (`team_id`) and `event-delete` (`event_id`).
 
+## Unregistering a single post
+
+In **Register**, every registered post has an **Unregister** button. After a confirmation the post leaves its event and the standings, its manual observations are deleted, and it goes back to ordinary tracking (automatic snapshots are kept). It then shows up again as "To register" and can be registered with a different event, creator or publication time. Typical use: an event window has to change, but some posts would fall outside it. The event form names those posts; unregister them, save the new window, then register them again. API: `entry-delete` (`entry_id`); the audit trail records the removed registration.
+
 ## Two leaderboards
 
 Each team needs at least one TikTok creator; Instagram creators are optional for now (`REQUIRED_PLATFORMS` in `race.py`). A team can have several creators on each platform. Every creator is a row of their own, shown under the team's name, so a team can hold several places (even the whole podium). There are two independent leaderboards:

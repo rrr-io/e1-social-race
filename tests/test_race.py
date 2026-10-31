@@ -184,9 +184,25 @@ class Race(unittest.TestCase):
         self.assertNotIn('available_events', race.read())
 
     def test_event_edit_cannot_exclude_posts(self):
-        with self.assertRaisesRegex(ValueError, 'exclude 1'):
+        with self.assertRaisesRegex(ValueError, r'leave out 1 registered post: Creator X \(Instagram, published 28 Oct 18:10 KST\)\. Unregister'):
             race.mutate('event-update', {'event_id': 1, 'name': 'Invalid', 'starts': '2026-10-28T18:30', 'ends': '2026-10-28T23:00'}, 'admin')
         self.assertEqual(race.read()['events'][0]['name'], 'Opening')
+
+    def test_unregister_one_post_then_change_window(self):
+        self.manual()
+        race.mutate('entry-delete', {'entry_id': 1}, 'admin')
+        data = race.read(admin=True)
+        self.assertEqual(data['entries'], [])
+        self.assertIsNone(data['tracked_posts'][0]['entry_id'])  # still tracked
+        detail = json.loads(data['audit'][0]['details'])
+        self.assertEqual((data['audit'][0]['action'], detail['deleted_manual_observations'], detail['unregistered']['creator']), ('entry-delete', 1, 'Creator X'))
+        with storage.connection() as c:
+            self.assertLess(c.execute('SELECT next_check FROM posts WHERE id=1').fetchone()[0], race.NEVER)
+        race.mutate('event-update', {'event_id': 1, 'name': 'Opening', 'starts': '2026-10-28T18:30', 'ends': '2026-10-28T23:00'}, 'admin')
+        race.mutate('register-post', {'post_id': 1, 'creator_id': 1, 'event_id': 1, 'published_at': '2026-10-28T18:40'}, 'admin')
+        self.assertEqual(race.read()['entries'][0]['published_at'], race.timestamp('2026-10-28T18:40'))
+        with self.assertRaisesRegex(ValueError, 'no longer registered'):
+            race.mutate('entry-delete', {'entry_id': 999}, 'admin')
 
     def test_event_edit_unknown_duplicate_and_frozen(self):
         edit = {'event_id': 999, 'name': 'Changed', 'starts': '2026-10-28T18:00', 'ends': '2026-10-28T23:00'}
