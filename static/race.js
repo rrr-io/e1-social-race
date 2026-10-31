@@ -64,7 +64,11 @@ const creatorNames = (team, platform) => creatorsOf(team, platform).map(c => c.n
 // Every team needs a TikTok creator; Instagram is optional for now.
 const REQUIRED = ['tiktok'];
 const metricOf = (data, platform) => (data.metrics || {})[platform] || (platform === 'tiktok' ? 'views' : 'likes');
+// The public page leaves Instagram out entirely until an Instagram post is registered.
+const publicPlatforms = data => admin ? PLATFORMS : PLATFORMS.filter(p => p !== 'instagram' || (data?.entries || []).some(e => e.platform === p));
 function rulesText(data) {
+  const shown = publicPlatforms(data);
+  if (shown.length === 1) return `${PLATFORM_NAME[shown[0]]} ranks creators by ${metricOf(data, shown[0])}. The top three take the podium.`;
   return `Instagram ranks creators by likes, TikTok by views. Each leaderboard has its own podium.`;
 }
 
@@ -170,7 +174,7 @@ function renderScopes(data) {
       ? 'Grand Prix total: each creator\'s event results added up. This decides the bonus votes (P1 +2%, P2 and P3 +1%).'
       : current.status === 'live'
         ? `${current.name} is live until ${kst(current.ends)} KST. Its result is saved at the close and the next event starts from zero.`
-        : `${current.name} closed on ${kst(current.ends)} KST. Result saved; later likes and views do not change it.`;
+        : `${current.name} closed on ${kst(current.ends)} KST. Result saved; later ${publicPlatforms(data).map(p => metricOf(data, p)).join(' and ')} do not change it.`;
   }
 }
 
@@ -183,7 +187,7 @@ const soleLeader = rows => { const top = (rows || []).filter(r => r.rank === 1 &
 // Desktop stays neutral (E1 colours). On phones only one leaderboard is visible,
 // so the page takes the colours of that leaderboard's P1 team.
 const phone = window.matchMedia('(max-width: 820px)');
-const activeBoard = () => document.querySelector('.boards')?.dataset.show || 'instagram';
+const activeBoard = () => document.querySelector('.boards')?.dataset.show || 'tiktok';
 function renderLeaderTheme(data) {
   if (admin || !data) return;
   const leaders = Object.fromEntries(PLATFORMS.map(p => [p, soleLeader(viewBoards(data)[p])]));
@@ -210,8 +214,12 @@ phone.addEventListener?.('change', () => renderLeaderTheme(lastData));
 function showBoardsWithPosts(data) {
   const boards = document.querySelector('.boards');
   if (!boards || admin) return;
-  const live = PLATFORMS.filter(p => (viewBoards(data)[p] || []).some(row => row.posts));
-  const visible = live.length ? live : PLATFORMS;
+  const available = publicPlatforms(data);
+  const live = available.filter(p => (viewBoards(data)[p] || []).some(row => row.posts));
+  const visible = live.length ? live : available;
+  document.querySelectorAll('.board-tabs [data-board]').forEach(tab => { tab.hidden = !available.includes(tab.dataset.board); });
+  const postsNote = $('posts-note');
+  if (postsNote) postsNote.textContent = `${available.length === 1 ? `${PLATFORM_NAME[available[0]]} posts score their ${metricOf(data, available[0])}` : 'Instagram posts score their likes, TikTok posts their views'} (highlighted). Each post counts with its latest total up to its event's close, not the sum of hourly checks. Missing counts are never treated as zero. Times are in KST.`;
   for (const platform of PLATFORMS) {
     const board = boards.querySelector(`.board[data-platform="${platform}"]`);
     if (board) board.hidden = !visible.includes(platform);
@@ -224,7 +232,7 @@ function showBoardsWithPosts(data) {
     document.querySelectorAll('.board-tabs [data-board]').forEach(t => t.setAttribute('aria-selected', String(t.dataset.board === visible[0])));
   }
   const rules = $('rules');
-  if (rules && visible.length === 1) rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once it has posts${scopeOf(data).type === 'event' ? ' in this event' : ''}.`;
+  if (rules && visible.length === 1 && available.length > 1) rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once it has posts${scopeOf(data).type === 'event' ? ' in this event' : ''}.`;
 }
 
 // Standings: one timing tower per platform (public) or a table (admin) ----------------
