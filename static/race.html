@@ -50,6 +50,8 @@
       <h2 id="standings-heading" tabindex="-1">Standings</h2>
       <p id="rules" class="rules"></p>
     </div>
+    <div id="scope-bar" class="scope-bar" role="group" aria-label="Standings for" hidden></div>
+    <p id="scope-note" class="scope-note"></p>
     <div class="board-tabs" role="tablist" aria-label="Leaderboard">
       <button type="button" role="tab" aria-selected="true" data-board="instagram">Instagram</button>
       <button type="button" role="tab" aria-selected="false" data-board="tiktok">TikTok</button>
@@ -64,7 +66,7 @@
         <ol id="tower-tiktok" class="tower" aria-busy="true" aria-label="TikTok leaderboard"><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li><li class="tower-row skeleton" aria-hidden="true"></li></ol>
       </div>
     </div>
-    <p class="footnote">Each team has one creator per platform. On each leaderboard, P1 earns 2% and P2 and P3 earn 1% of the team's Grand Prix base points, so a team can collect bonuses from both. Creators with a post still awaiting counts are not ranked yet. Ties are left unresolved.</p>
+    <p class="footnote">Each creator is ranked on their own, under their team's name; a team can have several creators per platform. Every posting event has its own standings, saved when the event closes; the Grand Prix total adds them up. On the total, P1 earns 2% and P2 and P3 earn 1% of the team's Grand Prix base points on each leaderboard. Creators with a post still awaiting counts are not ranked yet. Ties are left unresolved.</p>
   </section>
 
   <section aria-labelledby="posts-heading">
@@ -75,7 +77,7 @@
         <label><span class="sr">Filter by event</span><select id="event-filter"><option value="">All events</option></select></label>
       </div>
     </div>
-    <p class="footnote">Instagram posts score their likes, TikTok posts their views (highlighted). Each post counts with its latest total, not the sum of hourly checks. Missing counts are never treated as zero. Times are in KST.</p>
+    <p class="footnote">Instagram posts score their likes, TikTok posts their views (highlighted). Each post counts with its latest total up to its event's close, not the sum of hourly checks. Missing counts are never treated as zero. Times are in KST.</p>
     <div class="scroll">
       <table id="entries-table">
         <thead><tr><th>Team / creator</th><th>Event</th><th>Post</th><th class="num">Likes</th><th class="num">Comments</th><th class="num">Views</th><th class="num">Score</th><th>Counted (KST)</th><th>Source</th></tr></thead>

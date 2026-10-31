@@ -58,6 +58,11 @@ function resetForm(form) {
 // Rules -------------------------------------------------------------------
 const PLATFORMS = ['instagram', 'tiktok'];
 const PLATFORM_NAME = {instagram: 'Instagram', tiktok: 'TikTok'};
+// A team can have several creators per platform: [{id, name}, …].
+const creatorsOf = (team, platform) => team?.creators?.[platform] || [];
+const creatorNames = (team, platform) => creatorsOf(team, platform).map(c => c.name);
+// Every team needs a TikTok creator; Instagram is optional for now.
+const REQUIRED = ['tiktok'];
 const metricOf = (data, platform) => (data.metrics || {})[platform] || (platform === 'tiktok' ? 'views' : 'likes');
 function rulesText(data) {
   return `Instagram ranks creators by likes, TikTok by views. Each leaderboard has its own podium.`;
@@ -136,6 +141,43 @@ function renderOverall(data, t) {
   $('overall-end').textContent = `${kst(data.end)} KST`;
 }
 
+// Which standings are shown: one event (rankings restart each event) or the Grand Prix total.
+let selectedScope = null;
+const scopeOf = data => (data.scopes || []).find(s => s.key === selectedScope)
+  || (data.scopes || []).find(s => s.key === data.current_scope)
+  || {key: 'total', type: 'total', name: 'Grand Prix total', boards: data.boards || {}};
+const viewBoards = data => scopeOf(data).boards || {};
+
+function renderScopes(data) {
+  const bar = $('scope-bar');
+  if (!bar || admin) return;
+  const scopes = (data.scopes || []).filter(s => s.type === 'total' || s.status !== 'upcoming');
+  if (!scopes.some(s => s.key === selectedScope)) selectedScope = data.current_scope;
+  bar.replaceChildren(...scopes.map(scope => {
+    const b = el('button', 'scope');
+    b.type = 'button'; b.dataset.scope = scope.key;
+    b.setAttribute('aria-pressed', String(scope.key === selectedScope));
+    b.append(el('strong', null, scope.name));
+    b.append(el('span', `scope-state ${scope.type === 'total' ? 'total' : scope.status}`,
+      scope.type === 'total' ? 'Sum of all events' : scope.status === 'live' ? 'Live' : 'Final'));
+    b.addEventListener('click', () => { selectedScope = scope.key; renderScopes(data); renderStandings(data); });
+    return b;
+  }));
+  bar.hidden = scopes.length < 2;
+  const current = scopeOf(data), note = $('scope-note');
+  if (note) {
+    note.textContent = current.type === 'total'
+      ? 'Grand Prix total: each creator\'s event results added up. This decides the bonus votes (P1 +2%, P2 and P3 +1%).'
+      : current.status === 'live'
+        ? `${current.name} is live until ${kst(current.ends)} KST. Its result is saved at the close and the next event starts from zero.`
+        : `${current.name} closed on ${kst(current.ends)} KST. Result saved; later likes and views do not change it.`;
+  }
+}
+
+function renderStandings(data) {
+  showBoardsWithPosts(data); renderTower(data); renderLeaderTheme(data);
+}
+
 const soleLeader = rows => { const top = (rows || []).filter(r => r.rank === 1 && r.score != null); return top.length === 1 ? top[0] : null; };
 
 // Desktop stays neutral (E1 colours). On phones only one leaderboard is visible,
@@ -144,7 +186,7 @@ const phone = window.matchMedia('(max-width: 820px)');
 const activeBoard = () => document.querySelector('.boards')?.dataset.show || 'instagram';
 function renderLeaderTheme(data) {
   if (admin || !data) return;
-  const leaders = Object.fromEntries(PLATFORMS.map(p => [p, soleLeader(data.boards?.[p])]));
+  const leaders = Object.fromEntries(PLATFORMS.map(p => [p, soleLeader(viewBoards(data)[p])]));
   const shown = phone.matches ? leaders[activeBoard()] : null;
   const key = shown ? teamKey(shown.team) : 'other';
   if (key !== 'other') document.body.dataset.leader = key; else delete document.body.dataset.leader;
@@ -168,7 +210,7 @@ phone.addEventListener?.('change', () => renderLeaderTheme(lastData));
 function showBoardsWithPosts(data) {
   const boards = document.querySelector('.boards');
   if (!boards || admin) return;
-  const live = PLATFORMS.filter(p => (data.entries || []).some(e => e.platform === p));
+  const live = PLATFORMS.filter(p => (viewBoards(data)[p] || []).some(row => row.posts));
   const visible = live.length ? live : PLATFORMS;
   for (const platform of PLATFORMS) {
     const board = boards.querySelector(`.board[data-platform="${platform}"]`);
@@ -182,7 +224,7 @@ function showBoardsWithPosts(data) {
     document.querySelectorAll('.board-tabs [data-board]').forEach(t => t.setAttribute('aria-selected', String(t.dataset.board === visible[0])));
   }
   const rules = $('rules');
-  if (rules && visible.length === 1) rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once its first post is registered.`;
+  if (rules && visible.length === 1) rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once it has posts${scopeOf(data).type === 'event' ? ' in this event' : ''}.`;
 }
 
 // Standings: one timing tower per platform (public) or a table (admin) ----------------
@@ -190,7 +232,8 @@ function renderTower(data) {
   for (const platform of PLATFORMS) {
     const tower = $(`tower-${platform}`);
     if (!tower) continue;
-    const rows = data.boards?.[platform] || [];
+    const scope = scopeOf(data);
+    const rows = viewBoards(data)[platform] || [];
     const leader = soleLeader(rows);
     tower.replaceChildren();
     tower.removeAttribute('aria-busy');
@@ -213,7 +256,7 @@ function renderTower(data) {
       const score = el('div', 'score');
       if (row.score != null) {
         score.append(el('strong', null, fmt(row.score)));
-        score.append(el('span', 'gap', leader && row !== leader ? `−${fmt(leader.score - row.score)}` : leader ? `${unit} · leader` : unit));
+        score.append(el('span', 'gap', leader && row !== leader ? `−${fmt(leader.score - row.score)}` : leader ? `${unit} · ${scope.type === 'event' && scope.status === 'closed' ? 'winner' : 'leader'}` : unit));
       } else {
         score.append(el('strong', 'pending', row.posts ? 'Pending' : '—'));
         score.append(el('span', 'gap', row.posts ? `${row.missing} ${row.missing === 1 ? 'post' : 'posts'} awaiting counts` : 'No posts yet'));
@@ -224,7 +267,7 @@ function renderTower(data) {
         bonus.classList.add('chip', 'accent');
         bonus.textContent = `+${row.bonus_percent}%${row.bonus_points == null ? '' : ` · ${fmt(row.bonus_points)} GP`}`;
         bonus.title = 'Grand Prix bonus preview';
-      } else if (row.rank && row.rank <= 3 && row.bonus_percent == null) {
+      } else if (row.tied && row.rank && row.rank <= 3) {
         bonus.classList.add('chip', 'warn'); bonus.textContent = 'Tie';
         bonus.title = 'Tied on the podium: the bonus stays unresolved until a tie-break is agreed.';
       }
@@ -284,12 +327,11 @@ function renderEntries(data) {
     row.dataset.team = teamKey(team?.name);
     const teamCell = cell(row, '', 'team-cell');
     teamCell.append(el('span', 'dot', ''), document.createTextNode(team?.name || 'Unknown team'));
-    const creator = team?.creators?.[entry.platform];
-    if (creator) teamCell.append(el('small', 'creator', creator));
+    if (entry.creator) teamCell.append(el('small', 'creator', entry.creator));
     cell(row, eventOf(entry.event_id)?.name || 'Unknown event');
     const link = el('a', 'post-link', `${entry.platform === 'tiktok' ? 'TikTok' : entry.platform === 'instagram' ? 'Instagram' : entry.platform} ↗`);
     link.href = entry.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    link.setAttribute('aria-label', `Open the ${entry.platform} post of ${team?.name || 'this team'} (new tab)`);
+    link.setAttribute('aria-label', `Open the ${entry.platform} post of ${entry.creator || team?.name || 'this team'} (new tab)`);
     cell(row, '').append(link);
     for (const key of ['likes', 'comments', 'views']) cell(row, fmt(entry.metrics?.[key]), key === entry.metric ? 'num counted' : 'num');
     cell(row, fmt(entry.score), 'num strong');
@@ -345,6 +387,7 @@ async function load() {
   frozen = data.state === 'Final';
   if ($('status')) $('status').textContent = `${data.state} · Opens ${kst(data.start)} KST · Closes ${kst(data.end)} KST`;
   if ($('rules')) $('rules').textContent = rulesText(data);
+  renderScopes(data);
   showBoardsWithPosts(data);
   renderHero(data); renderTower(data); renderTeamsTable(data); renderEntries(data);
   if ($('refreshed')) $('refreshed').textContent = `Checked for updates at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} (your time) · refreshes every minute.`;
@@ -368,7 +411,7 @@ function renderAdmin(data) {
   const teamName = id => teams.find(t => t.id === id)?.name || 'Unknown';
   const eventName = id => (data.available_events || data.events).find(e => e.id === id)?.name || 'Unknown';
   const entrySelect = $('entry-options');
-  options(entrySelect, data.entries, e => `${teamName(e.team_id)} / ${eventName(e.event_id)} / ${e.platform}`);
+  options(entrySelect, data.entries, e => `${teamName(e.team_id)} / ${e.creator || '?'} / ${eventName(e.event_id)} / ${PLATFORM_NAME[e.platform] || e.platform}`);
   if (!data.entries.length) { const option = el('option', null, 'No registered posts yet'); option.value = ''; entrySelect.append(option); }
   const audit = $('audit'); audit.replaceChildren();
   for (const item of data.audit) {
@@ -386,8 +429,8 @@ function renderChecklist(data, teams) {
   if (!list) return;
   const events = data.available_events || data.events;
   const items = [
-    [teams.length > 0 && teams.every(t => PLATFORMS.every(p => t.creators?.[p])), `${teams.length} ${teams.length === 1 ? 'team' : 'teams'}`,
-      teams.length ? (n => n ? `${n} missing a creator` : 'Instagram and TikTok creator for each')(teams.filter(t => !PLATFORMS.every(p => t.creators?.[p])).length) : 'Add each team with its Instagram and TikTok creator.', 'teams-heading'],
+    [teams.length > 0 && teams.every(t => REQUIRED.every(p => creatorsOf(t, p).length)), `${teams.length} ${teams.length === 1 ? 'team' : 'teams'}`,
+      teams.length ? (n => n ? `${n} missing a TikTok creator` : `${teams.reduce((sum, t) => sum + PLATFORMS.reduce((k, p) => k + creatorsOf(t, p).length, 0), 0)} creators on Instagram and TikTok`)(teams.filter(t => !REQUIRED.every(p => creatorsOf(t, p).length)).length) : 'Add each team with its creators (TikTok required, Instagram optional).', 'teams-heading'],
     [teams.length > 0 && teams.every(t => t.base_points != null), 'GP base points', teams.length ? (n => n ? `${n} ${n === 1 ? 'team' : 'teams'} without base points` : 'Set for every team')(teams.filter(t => t.base_points == null).length) : 'Needed for the bonus preview.', 'scoring-details'],
     [events.length > 0, `${events.length} posting ${events.length === 1 ? 'event' : 'events'}`, events.length ? 'Edit windows below if needed.' : 'Add the scheduled posting events.', 'events-heading'],
     [data.entries.length > 0, `${data.entries.length} registered ${data.entries.length === 1 ? 'post' : 'posts'}`, 'Track posts, then register them.', null],
@@ -434,8 +477,18 @@ function renderRegistration(data) {
         wrapper.append(input); form.append(wrapper); return input;
       };
       const eventSelect = select('Event', 'event_id', data.events, e => `${e.starts < data.start ? '[TEST] ' : ''}${e.name}`);
-      const teamSelect = select(`Team / ${PLATFORM_NAME[post.platform]} creator`, 'team_id', teams, t => `${t.name} / ${t.creators?.[post.platform] || `no ${PLATFORM_NAME[post.platform]} creator`}`);
-      teams.forEach((t, i) => { if (!t.creators?.[post.platform]) teamSelect.options[i + 1].disabled = true; });
+      // Every creator of this platform, grouped by team.
+      const creatorLabel = el('label', null, `${PLATFORM_NAME[post.platform]} creator`);
+      const creatorSelect = el('select'); creatorSelect.name = 'creator_id'; creatorSelect.required = true;
+      const blankCreator = el('option', null, `Choose who published it`); blankCreator.value = ''; creatorSelect.append(blankCreator);
+      for (const t of teams) {
+        const group = el('optgroup'); group.label = t.name;
+        for (const c of creatorsOf(t, post.platform)) { const o = el('option', null, `${c.name} · ${t.name}`); o.value = c.id; group.append(o); }
+        if (!group.children.length) { const o = el('option', null, `no ${PLATFORM_NAME[post.platform]} creator`); o.disabled = true; group.append(o); }
+        creatorSelect.append(group);
+      }
+      creatorSelect.value = '';
+      creatorLabel.append(creatorSelect); form.append(creatorLabel);
       const publishedField = dateTimeField('Published at (KST)', 'published_at', 'Choose an event to see its publication window.');
       form.append(publishedField);
       const published = publishedField.querySelector('input[type="hidden"]');
@@ -445,10 +498,10 @@ function renderRegistration(data) {
         published.setRange(selected && kstInput(selected.starts), selected && kstInput(selected.ends));
       });
       const save = el('button', null, 'Register post'); save.type = 'submit';
-      const blocked = !teams.length || !data.events.length;
+      const blocked = !teams.some(t => creatorsOf(t, post.platform).length) || !data.events.length;
       save.disabled = frozen || blocked; form.append(save);
       const message = el('p', 'form-message'); message.setAttribute('role', 'status'); form.append(message);
-      if (blocked) inlineMessage(message, 'info', 'Create at least one event and one team/creator in Setup first.');
+      if (blocked) inlineMessage(message, 'info', `Create at least one event and one ${PLATFORM_NAME[post.platform]} creator in Setup first.`);
       card.append(form);
     }
     list.append(card);
@@ -460,6 +513,54 @@ function renderRegistration(data) {
     const a = el('a', null, 'Track posts'); a.href = '#monitoring'; p.append(a, document.createTextNode(' first, then come back here.'));
     empty.append(p); list.append(empty);
   }
+}
+
+// Team form: a list of creator inputs per platform ------------------------------
+function creatorRow(fieldset, creator = {}) {
+  const platform = fieldset.dataset.platform;
+  const rows = fieldset.querySelector('.creator-rows');
+  const row = el('div', 'creator-row');
+  const input = el('input');
+  Object.assign(input, {maxLength: 120, autocomplete: 'off', spellcheck: false, placeholder: 'Name or @handle', value: creator.name || ''});
+  input.setAttribute('autocapitalize', 'none');
+  if (creator.id) input.dataset.id = creator.id;
+  const remove = el('button', 'btn-ghost remove-creator', '×'); remove.type = 'button';
+  row.append(input, remove);
+  rows.append(row);
+  syncCreatorRows(fieldset);
+  return input;
+}
+function syncCreatorRows(fieldset) {
+  const rows = [...fieldset.querySelectorAll('.creator-row')];
+  const label = PLATFORM_NAME[fieldset.dataset.platform];
+  rows.forEach((row, i) => {
+    const input = row.querySelector('input'), remove = row.querySelector('.remove-creator');
+    input.required = i === 0 && REQUIRED.includes(fieldset.dataset.platform);
+    input.setAttribute('aria-label', `${label} creator ${i + 1}`);
+    remove.setAttribute('aria-label', `Remove ${label} creator ${i + 1}`);
+    remove.hidden = rows.length === 1;
+  });
+}
+function setCreators(form, team) {
+  form.querySelectorAll('.creator-list').forEach(fieldset => {
+    fieldset.querySelector('.creator-rows').replaceChildren();
+    const list = creatorsOf(team, fieldset.dataset.platform);
+    (list.length ? list : [{}]).forEach(c => creatorRow(fieldset, c));
+  });
+}
+function readCreators(form) {
+  return Object.fromEntries([...form.querySelectorAll('.creator-list')].map(fieldset => [fieldset.dataset.platform,
+    [...fieldset.querySelectorAll('.creator-row input')].map(i => ({id: i.dataset.id ? Number(i.dataset.id) : null, name: i.value.trim()})).filter(c => c.name)]));
+}
+// When an edit drops creators who have registered posts, say so before saving.
+function removedCreatorPosts(form, creators) {
+  const team = (lastData?.available_teams || []).find(t => String(t.id) === form.elements.team_id.value);
+  if (!team) return null;
+  const kept = new Set(PLATFORMS.flatMap(p => creators[p].map(c => c.id)).filter(Boolean));
+  const gone = PLATFORMS.flatMap(p => creatorsOf(team, p)).filter(c => !kept.has(c.id));
+  const posts = (lastData.tracked_posts || []).filter(p => p.entry_id && gone.some(c => c.id === p.assigned_creator_id)).length;
+  if (!gone.length) return null;
+  return `Remove ${gone.map(c => c.name).join(', ')} from ${team.name}?${posts ? `\n\n${posts === 1 ? '1 registered post' : `${posts} registered posts`} will leave the race. ${posts === 1 ? 'It stays' : 'They stay'} in Track posts with ${posts === 1 ? 'its' : 'their'} history and can be registered again.` : ''}`;
 }
 
 function resetEventForm() {
@@ -476,6 +577,7 @@ function resetTeamForm() {
   $('team-form-title').textContent = 'Add team & creators';
   $('save-team').textContent = 'Add team';
   $('cancel-team').hidden = true;
+  setCreators(form, null);
   if (lastData) renderTeamSelect(lastData.available_teams || lastData.teams);
 }
 
@@ -522,6 +624,10 @@ function renderEvents(data) {
     cell(row, item.name);
     const typeCell = cell(row, ''); typeCell.append(el('span', item.starts < data.start ? 'chip warn' : 'chip ok', item.starts < data.start ? 'Simulation' : 'Official'));
     cell(row, kst(item.starts)); cell(row, kst(item.ends)); cell(row, fmt(item.post_count));
+    const t = Date.now() / 1000;
+    const resultCell = cell(row, '');
+    resultCell.append(item.saved_at ? el('span', 'chip ok', `Saved ${kst(item.saved_at)}`)
+      : t >= item.ends ? el('span', 'chip warn', 'Saving…') : t >= item.starts ? el('span', 'chip accent', 'Live') : el('span', 'chip', 'Upcoming'));
     rowActions(row, `event ${item.name}`, () => {
       const form = $('event-form');
       form.dataset.action = 'event-update';
@@ -539,7 +645,7 @@ function renderEvents(data) {
       ['Event deleted', `“${item.name}” was removed${item.post_count ? ` and ${item.post_count} ${item.post_count === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
     list.append(row);
   }
-  if (!events.length) emptyRow(list, 'No events yet. Add your first event with the form below.', 6);
+  if (!events.length) emptyRow(list, 'No events yet. Add your first event with the form below.', 7);
   labelCells(list.closest('table'));
 }
 
@@ -548,24 +654,29 @@ function renderSetupTeams(data, teams) {
   for (const team of teams) {
     const row = el('tr'); row.dataset.team = teamKey(team.name);
     cell(row, team.name);
-    for (const platform of PLATFORMS) { const td = cell(row, team.creators?.[platform] || 'Missing'); if (!team.creators?.[platform]) td.classList.add('missing'); }
+    for (const platform of PLATFORMS) {
+      const names = creatorNames(team, platform);
+      const td = cell(row, names.length ? '' : REQUIRED.includes(platform) ? 'Missing' : '—');
+      if (names.length) { const box = el('span', 'creator-names'); names.forEach(n => box.append(el('span', null, n))); td.append(box); } else if (REQUIRED.includes(platform)) td.classList.add('missing');
+    }
     cell(row, team.base_points == null ? 'Not set' : fmt(team.base_points));
     const registered = (data.tracked_posts || []).filter(p => p.entry_id && p.assigned_team === team.name).length;
-    const who = `${team.name} (${PLATFORMS.map(p => team.creators?.[p]).filter(Boolean).join(' / ')})`;
+    const who = team.name;
+    const creatorCount = PLATFORMS.reduce((n, p) => n + creatorsOf(team, p).length, 0);
     rowActions(row, team.name, () => {
       const form = $('team-form');
       form.dataset.action = 'team-update';
       form.elements.team_id.value = team.id;
       renderTeamSelect(teams);
       $('team-select').value = E1_TEAMS.find(name => sameTeam(name, team.name)) || team.name;
-      for (const platform of PLATFORMS) form.elements[platform].value = team.creators?.[platform] || '';
+      setCreators(form, team);
       form.elements.base_points.value = team.base_points ?? '';
       $('team-form-title').textContent = `Edit ${team.name}`;
       $('save-team').textContent = 'Save changes';
       $('cancel-team').hidden = false;
-      startEdit(form, form.elements.instagram);
+      startEdit(form, form.querySelector('.creator-row input'));
     }, button => removeRecord(button, 'team-delete', {team_id: team.id},
-      `Delete ${who} and both its creators?${postsNote(registered)}`,
+      `Delete ${who} and its ${creatorCount} ${creatorCount === 1 ? 'creator' : 'creators'}?${postsNote(registered)}`,
       ['Team deleted', `${who} was removed${registered ? ` and ${registered} ${registered === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
     body.append(row);
   }
@@ -599,11 +710,16 @@ function successText(action, payload, data) {
   switch (action) {
     case 'event': return ['Event added', `“${payload.name}” is ready for registrations.`];
     case 'event-update': return ['Event updated', `Changes to “${payload.name}” were saved.`];
-    case 'team': return ['Team added', `${payload.name}: Instagram ${payload.instagram} · TikTok ${payload.tiktok}.`];
-    case 'team-update': return ['Team updated', `${payload.name}: Instagram ${payload.instagram} · TikTok ${payload.tiktok}.`];
+    case 'team': case 'team-update': {
+      const list = PLATFORMS.filter(p => payload.creators?.[p]?.length).map(p => `${PLATFORM_NAME[p]} ${payload.creators[p].map(c => c.name).join(', ')}`).join(' · ');
+      return [action === 'team' ? 'Team added' : 'Team updated', `${payload.name}: ${list}.`];
+    }
     case 'base': return ['Base points saved', `${team(payload.team_id)?.name || 'The team'} now has ${fmt(Number(payload.base_points))} base points.`];
-    case 'register-post': return ['Post registered', `Assigned to ${team(payload.team_id)?.name || 'the team'} · ${event(payload.event_id)?.name || 'the event'}. Its first race check is scheduled.`];
-    case 'manual': return ['Observation saved', payload.final ? 'Certified final counts recorded.' : 'The manual counts were added to the history.'];
+    case 'register-post': {
+      const owner = (data?.available_teams || data?.teams || []).flatMap(t => PLATFORMS.flatMap(p => creatorsOf(t, p).map(c => ({...c, team: t.name})))).find(c => String(c.id) === String(payload.creator_id));
+      return ['Post registered', `Assigned to ${owner ? `${owner.name} (${owner.team})` : 'the creator'} · ${event(payload.event_id)?.name || 'the event'}. Its first race check is scheduled.`];
+    }
+    case 'manual': return ['Observation saved', 'The manual counts were added. If the event has closed, its saved result was updated.'];
     case 'finalize': return ['Results published', 'The final standings are now frozen.'];
     default: return ['Saved', ''];
   }
@@ -623,6 +739,17 @@ if (admin) {
   document.querySelectorAll('[data-datetime]').forEach(slot => slot.replaceWith(dateTimeField(slot.dataset.label, slot.dataset.datetime, slot.dataset.hint)));
   $('cancel-event').addEventListener('click', () => { resetEventForm(); inlineMessage($('event-form').querySelector('.form-message'), 'info', ''); });
   $('cancel-team').addEventListener('click', () => { resetTeamForm(); inlineMessage($('team-form').querySelector('.form-message'), 'info', ''); });
+  setCreators($('team-form'), null);
+  $('team-form').addEventListener('click', event => {
+    const add = event.target.closest('.add-creator'), remove = event.target.closest('.remove-creator');
+    if (add) creatorRow(add.closest('.creator-list')).focus();
+    if (remove) {
+      const fieldset = remove.closest('.creator-list'), row = remove.closest('.creator-row');
+      const next = row.nextElementSibling || row.previousElementSibling;
+      row.remove(); syncCreatorRows(fieldset);
+      next?.querySelector('input')?.focus();
+    }
+  });
   document.addEventListener('submit', async event => {
     const form = event.target;
     if (!form.matches('form[data-action]')) return;
@@ -634,7 +761,11 @@ if (admin) {
     if (invalid) { inlineMessage(message, 'error', invalid[0]); invalid[1].focus(); return; }
     const action = form.dataset.action;
     const payload = Object.fromEntries(new FormData(form));
-    if (action === 'manual') payload.final = form.elements.final.checked;
+    if (form.id === 'team-form') {
+      payload.creators = readCreators(form);
+      const removed = removedCreatorPosts(form, payload.creators);
+      if (removed && !confirm(removed)) return;
+    }
     if (action === 'finalize' && !confirm('Freeze and publish the final results? This cannot be undone here.')) return;
     busy(button, true, 'Saving…');
     inlineMessage(message, 'progress', 'Saving…');

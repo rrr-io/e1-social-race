@@ -87,7 +87,7 @@ class HTTP(unittest.TestCase):
         self.assertEqual(self.request('/api/race/team', {'name':'Team','instagram':'Person','tiktok':'Person TT'})[0], 200)
         public = json.loads(self.request('/api/race', auth=False)[1])
         self.assertNotIn('audit', public)
-        self.assertEqual(public['teams'][0]['creators'], {'instagram': 'Person', 'tiktok': 'Person TT'})
+        self.assertEqual(public['teams'][0]['creators'], {'instagram': [{'id': 1, 'name': 'Person'}], 'tiktok': [{'id': 2, 'name': 'Person TT'}]})
         self.assertEqual(public['boards']['instagram'][0]['creator'], 'Person')
 
     def test_two_pages_and_legacy_redirects(self):

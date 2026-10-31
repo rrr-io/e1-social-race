@@ -38,7 +38,16 @@ Cookies and automatic extraction remain subject to platform access restrictions.
 
 Automatic observations made after the cutoff are excluded from scoring. A collector started at the cutoff normally finishes later, so its result is diagnostic rather than eligible final evidence. The system never presents a late count as a historical count.
 
-After closure, enter a certified manual final observation for each official post, referring to **8 November 23:59 KST**, with evidence for the cutoff counts. Then review all eligibility and figures and select **Freeze and publish final results**. This creates an immutable result snapshot and blocks further race mutations. Existing collection history is retained. Finalization is blocked if a team has no posts, any post lacks required final metrics, or a tie affects the podium. No tie-break rule has been invented.
+When the Grand Prix ends, review all eligibility and figures and select **Freeze and publish final results**. Certified manual final observations are no longer required: each post counts with its latest observation (automatic or manual) up to its event's close. Freezing creates an immutable result snapshot and blocks further race mutations. Existing collection history is retained. Finalization is blocked if a posted creator has no score or a tie affects a podium. No tie-break rule has been invented.
+
+## Per-event results
+
+Every posting event has its own standings. The event's closing time is the engagement cutoff for its posts: at the close the server saves each post's latest count up to that moment (`race_event_results`, audit action `event-close`), and the event result never changes afterwards on its own. The next event starts from zero with its own posts.
+
+- Posts of a closed event are no longer collected, which also reduces requests to the platforms. Ten minutes before the close an extra check is scheduled so the saved count is as fresh as possible.
+- The public page shows one button per event (Final / Live / Upcoming) plus **Grand Prix total**, which adds up the saved event results. Podium bonuses (P1 2%, P2/P3 1%) apply only to the total.
+- A manual count entered for a post of a closed event, a post registered late, or a change to a closed event's window discards the saved result and saves it again with the corrected data.
+- The Share tab can render an image for any single event or for the total.
 
 P1 receives 2%, P2 and P3 each receive 1% of their team's entered Grand Prix base points. These figures are previews; no points are transferred to an external voting system. Base points can be entered or corrected before finalization. No integer rounding policy is imposed: fractional bonus values are displayed. Agree the formula, tie-break rule, rounding policy and acceptable cutoff evidence before launch.
 
@@ -99,20 +108,20 @@ Deleting asks for confirmation. It removes the pair or event, unregisters its of
 
 ## Two leaderboards
 
-Each team has exactly one Instagram creator and one TikTok creator. There are two independent leaderboards:
+Each team needs at least one TikTok creator; Instagram creators are optional for now (`REQUIRED_PLATFORMS` in `race.py`). A team can have several creators on each platform. Every creator is a row of their own, shown under the team's name, so a team can hold several places (even the whole podium). There are two independent leaderboards:
 
 - **Instagram**: a creator's score is the sum of the latest like counts of their official Instagram posts.
 - **TikTok**: a creator's score is the sum of the latest view counts of their official TikTok posts.
 
 Other metrics are still collected and shown, but do not count. A post without the scored metric leaves its creator unranked ("Pending") until the count arrives. Creators with no posts yet are listed but not ranked.
 
-Each leaderboard has its own podium: P1 earns 2%, P2 and P3 earn 1% of the team's Grand Prix base points. A team can collect bonuses from both; the API returns each team's `bonus_points_total`. Ties on a podium block finalization on that leaderboard.
+Each leaderboard has its own podium: P1 earns 2%, P2 and P3 earn 1% of the team's Grand Prix base points. A team collects the bonus of every podium place its creators take, on both leaderboards; the API returns each team's `bonus_points_total`. Ties on a podium block finalization on that leaderboard.
 
-A post can only be registered to a team that has a creator on that post's platform. One post per platform per team per event is allowed.
+A post is registered to the creator who published it (the creator's platform must match the post). Each creator can have one post per event.
 
-API: `team` and `team-update` take `name`, `instagram`, `tiktok` and optional `base_points`. The public response contains `boards.instagram`, `boards.tiktok` (ranked rows with `team`, `creator`, `posts`, `score`, `rank`, `bonus_percent`, `bonus_points`) and `metrics` (`{"instagram": "likes", "tiktok": "views"}`). The `weights` action no longer exists.
+API: `team` and `team-update` take `name`, optional `base_points` and `creators`: `{"instagram": [{"id": 3, "name": "…"}, {"name": "new one"}], "tiktok": [...]}`. Creators with an `id` are kept (and renamed if the name changed), creators without one are added, and creators of the team that are left out are removed together with their race registrations (the tracked posts stay). Older clients can still send one name as `instagram` / `tiktok`. `register-post` and `entry` take `creator_id`; `team_id` alone is accepted only when the team has a single creator on that platform. The public response contains `boards.instagram`, `boards.tiktok` (ranked rows, one per creator, with `team`, `creator_id`, `creator`, `posts`, `score`, `rank`, `bonus_percent`, `bonus_points`) and `metrics` (`{"instagram": "likes", "tiktok": "views"}`). The `weights` action no longer exists.
 
-Upgrading an existing database: on startup, `race_teams.representative` is removed and that person becomes the team's creator on **both** platforms. Teams, events, registrations, manual observations and snapshots are kept. Check Setup afterwards and change the creators where needed. Back up the database before deploying.
+Upgrading an existing database: on startup, `race_teams.representative` is removed and that person becomes the team's creator on **both** platforms. Teams, events, registrations, manual observations and snapshots are kept. Check Setup afterwards and change the creators where needed. A later upgrade allows several creators per platform: `race_creators` loses its one-per-team-and-platform rule and every registration gets the `creator_id` of the team's creator on that platform. Back up the database before deploying.
 
 ## Refresh all counts before a snapshot
 

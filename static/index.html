@@ -39,14 +39,14 @@
 
     <section aria-labelledby="events-heading">
       <h3 id="events-heading">Posting events</h3>
-      <p class="section-note">Edit an event to rename it or move its window (assigned posts must stay inside it). Deleting an event unregisters its posts; they stay tracked.</p>
-      <div class="scroll"><table><thead><tr><th>Event</th><th>Type</th><th>Opens (KST)</th><th>Closes (KST)</th><th>Posts</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="event-list"></tbody></table></div>
+      <p class="section-note">Each event has its own standings. When the window closes, the result is saved: later likes and views no longer count, and the next event starts from zero. Moving a closed window recalculates its result. Deleting an event unregisters its posts; they stay tracked.</p>
+      <div class="scroll"><table><thead><tr><th>Event</th><th>Type</th><th>Opens (KST)</th><th>Closes (KST)</th><th>Posts</th><th>Result</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="event-list"></tbody></table></div>
     </section>
 
     <section aria-labelledby="teams-heading">
       <h3 id="teams-heading">Teams &amp; creators</h3>
-      <p class="section-note">One creator per team on each platform. Instagram is ranked by likes, TikTok by views.</p>
-      <div class="scroll"><table><thead><tr><th>Team</th><th>Instagram creator</th><th>TikTok creator</th><th>GP base points</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="setup-teams"></tbody></table></div>
+      <p class="section-note">A team can have several creators on each platform. Every creator is ranked on their own (Instagram by likes, TikTok by views), so one team can take more than one podium place.</p>
+      <div class="scroll"><table><thead><tr><th>Team</th><th>Instagram creators</th><th>TikTok creators</th><th>GP base points</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="setup-teams"></tbody></table></div>
     </section>
 
     <div class="forms">
@@ -63,8 +63,8 @@
         <h3 id="team-form-title">Add team &amp; creators</h3>
         <input type="hidden" name="team_id">
         <label>Team<select id="team-select" name="name" required></select><small class="field-hint">Teams already set up are greyed out: use Edit to change them.</small></label>
-        <label>Instagram creator<input name="instagram" required maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Name or @handle"></label>
-        <label>TikTok creator<input name="tiktok" required maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Name or @handle"><small class="field-hint">Can be the same person as on Instagram.</small></label>
+        <fieldset class="creator-list" data-platform="instagram"><legend>Instagram creators <span class="optional">optional</span></legend><div class="creator-rows"></div><button type="button" class="btn-ghost add-creator">+ Add Instagram creator</button></fieldset>
+        <fieldset class="creator-list" data-platform="tiktok"><legend>TikTok creators</legend><div class="creator-rows"></div><button type="button" class="btn-ghost add-creator">+ Add TikTok creator</button><small class="field-hint">A creator can be the same person on both platforms. Removing a creator also unregisters their posts.</small></fieldset>
         <label>Grand Prix base points <span class="optional">optional</span><input name="base_points" type="number" min="0" inputmode="numeric"></label>
         <div class="form-actions"><button id="save-team" type="submit">Add team</button><button id="cancel-team" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
         <p class="form-message" role="status" aria-live="polite"></p>
@@ -117,7 +117,7 @@
 
   <div id="register-panel" role="tabpanel" aria-labelledby="register-tab" hidden>
     <h2>Register tracked posts</h2>
-    <p class="workflow-note">Pick the event and team/creator for each tracked post and enter when it was actually published (KST). Registration can't be changed afterwards. <a href="#monitoring">Track another post</a> · <a href="#setup">Manage events and teams</a></p>
+    <p class="workflow-note">Pick the event and the creator who published each tracked post and enter when it was actually published (KST). Registration can't be changed afterwards. <a href="#monitoring">Track another post</a> · <a href="#setup">Manage events and teams</a></p>
     <div id="registration-list" class="forms registration-list"></div>
 
     <details>
@@ -134,13 +134,12 @@
           </div>
           <small class="field-hint">Leave a count empty if you don't know it: empty means unknown, not zero.</small>
           <label>Evidence reference / correction reason<textarea name="evidence" maxlength="500" required></textarea></label>
-          <label class="check"><input name="final" type="checkbox"> I certify these are the final eligible counts at the race cutoff, supported by the evidence above.</label>
           <div class="form-actions"><button type="submit">Save observation</button></div>
           <p class="form-message" role="status" aria-live="polite"></p>
         </form>
         <form data-action="finalize">
           <h3>Publish final results</h3>
-          <p class="section-note">Needs certified final counts for every post. A tie on the podium blocks finalisation. This freezes the competition records and cannot be undone here. Bonus figures are previews, not transfers to another system.</p>
+          <p class="section-note">Available after the race closes. Uses each event's saved result; every registered post needs its counts. A tie on the podium blocks finalisation. This freezes the competition records and cannot be undone here. Bonus figures are previews, not transfers to another system.</p>
           <label class="check"><input type="checkbox" required> I have reviewed eligibility, evidence, scoring and results.</label>
           <div class="form-actions"><button type="submit" class="danger">Freeze and publish final results</button></div>
           <p class="form-message" role="status" aria-live="polite"></p>
@@ -173,6 +172,10 @@
             <p id="refresh-text" class="field-hint" role="status" aria-live="polite"></p>
           </div>
         </div>
+        <fieldset>
+          <legend>Standings</legend>
+          <select name="scope" id="share-scope" aria-label="Standings for"></select>
+        </fieldset>
         <fieldset>
           <legend>Leaderboard</legend>
           <div class="segmented two">

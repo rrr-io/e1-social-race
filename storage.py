@@ -87,4 +87,6 @@ def finish(post, data=None, error=None):
         # Competition posts use the fixed KST observation schedule, including on failure.
         if c.execute('SELECT 1 FROM race_entries WHERE post_id=?', (post['id'],)).fetchone():
             import race
-            c.execute('UPDATE posts SET next_check=? WHERE id=?', (race.next_check(now), post['id']))
+            due = race.post_next_check(c, post['id'], now)
+            if due is not None:
+                c.execute('UPDATE posts SET next_check=? WHERE id=?', (due, post['id']))

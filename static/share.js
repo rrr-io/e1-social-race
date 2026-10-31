@@ -47,6 +47,7 @@ function options() {
   return {
     format: form.elements.format.value,
     board: form.elements.board.value,
+    scope: form.elements.scope.value,
     theme: form.elements.theme.value,
     kicker: form.elements.kicker.value.trim(),
     scores: form.elements.scores.checked,
@@ -59,8 +60,10 @@ function options() {
 // Race facts ------------------------------------------------------------------
 function facts(d, now) {
   // One leaderboard per image: Instagram (likes) or TikTok (views).
-  const board = options().board;
-  const teams = (d.boards?.[board] || []).map(r => ({...r, name: r.team, representative: r.creator || ''}));
+  const {board, scope: scopeKey} = options();
+  const scope = (d.scopes || []).find(s => s.key === scopeKey) || (d.scopes || []).find(s => s.key === d.current_scope)
+    || {type: 'total', name: 'Grand Prix total', boards: d.boards || {}};
+  const teams = ((scope.boards || {})[board] || []).map(r => ({...r, name: r.team, representative: r.creator || ''}));
   const leaders = teams.filter(t => t.rank === 1 && t.score != null);
   const leader = leaders.length === 1 ? leaders[0] : null;
   const total = Math.ceil((d.end - d.start) / 86400);
@@ -68,7 +71,7 @@ function facts(d, now) {
   if (d.state === 'Final') { dayLabel = 'FINAL'; dayValue = 'RESULTS'; }
   else if (now < d.start) { dayLabel = 'LIGHTS OUT'; dayValue = day(d.start); }
   else if (now > d.end) { dayLabel = 'RACE'; dayValue = 'CLOSED'; }
-  else { dayLabel = 'DAY'; dayValue = `${Math.min(Math.floor((now - d.start) / 86400) + 1, total)}/${total}`; }
+  else { dayLabel = ''; dayValue = 'GRAND PRIX'; }  // the event goes on the small line below
   const events = [...(d.events || [])].sort((a, b) => a.starts - b.starts);
   const live = events.filter(e => e.starts <= now && now <= e.ends);
   const next = events.find(e => e.starts > now);
@@ -77,14 +80,18 @@ function facts(d, now) {
   else if (next && d.state !== 'Final') eventLine = `Next: ${next.name} — opens ${kst(next.starts)} KST`;
   else if (events.length) eventLine = 'All posting events closed';
   else eventLine = 'Posting events coming soon';
+  if (scope.type === 'event') eventLine = scope.status === 'live' ? `${scope.name} — live until ${kst(scope.ends)} KST` : `${scope.name} — final result, closed ${kst(scope.ends)} KST`;
+  else if (scope.type === 'total' && d.scopes) eventLine = `Grand Prix total — all events added up`;
   const observed = (d.entries || []).map(e => e.observed_at).filter(Boolean);
-  const status = d.state === 'Final' ? 'FINAL RESULTS' : d.simulation ? 'SIMULATION' : now < d.start ? 'PRE-RACE' : now > d.end ? 'AWAITING FINAL CHECK' : 'PROVISIONAL';
+  const status = scope.type === 'event' ? (scope.status === 'live' ? 'LIVE' : 'EVENT RESULT') : d.state === 'Final' ? 'FINAL RESULTS' : d.simulation ? 'SIMULATION' : now < d.start ? 'PRE-RACE' : now > d.end ? 'AWAITING FINAL CHECK' : 'PROVISIONAL';
   const metric = ((d.metrics || {})[board] || (board === 'tiktok' ? 'views' : 'likes')).toUpperCase();
   const boardLabel = `${board === 'tiktok' ? 'TIKTOK' : 'INSTAGRAM'} · ${metric}`;
-  return {teams, leader, boardLabel, total, dayLabel, dayValue, eventLine, status,
+  const scopeEntries = scope.type === 'event' ? (d.entries || []).filter(e => e.event_id === scope.event_id) : (d.entries || []);
+  const scopeObserved = scopeEntries.map(e => e.observed_at).filter(Boolean);
+  return {teams, leader, boardLabel, scopeType: scope.type, leaderWord: scope.type === 'event' && scope.status === 'closed' ? 'WINNER' : 'LEADER', total, dayLabel, dayValue, eventLine, status,
     progress: Math.min(Math.max((now - d.start) / (d.end - d.start), 0), 1),
     snapshot: snapshotFmt.format(new Date(now * 1000)).replace(',', '').toUpperCase(),
-    asOf: observed.length ? `Counts as of ${kst(Math.max(...observed))} KST` : 'No counts yet'};
+    asOf: scopeObserved.length ? `Counts as of ${kst(Math.max(...scopeObserved))} KST` : 'No counts yet'};
 }
 
 // Layouts -----------------------------------------------------------------------
@@ -157,12 +164,12 @@ function hero(ctx, L, accent, f, o) {
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   ctx.fillStyle = accent; ctx.font = font(24 * s, 800);
   spaced(ctx, (o.kicker ? `${o.kicker} · ${f.boardLabel}` : `${f.boardLabel} LEADERBOARD`).toUpperCase(), x, y, 5 * s);
-  // "DAY 6/12": label and value share a baseline, value huge.
+  // Optional small label + huge value on one baseline ("GRAND PRIX", "LIGHTS OUT 28 OCT").
   const baseline = y + big * 0.98;
   ctx.fillStyle = alpha('#ffffff', 0.55);
   ctx.font = font(big * 0.34, 900, SANS, true);
   ctx.fillText(f.dayLabel, x, baseline);
-  const labelW = ctx.measureText(f.dayLabel).width + 18 * s;
+  const labelW = f.dayLabel ? ctx.measureText(f.dayLabel).width + 18 * s : 0;
   ctx.fillStyle = '#ffffff';
   ctx.fillText(fit(ctx, f.dayValue, w - labelW, big, 900, SANS, true), x + labelW, baseline);
   // Event line.
@@ -220,11 +227,11 @@ function rows(ctx, L, accent, ink, f, o) {
       scoreW = ctx.measureText(t.score != null ? fmt(t.score) : t.posts ? 'PENDING' : 'NO POSTS').width;
       if (showGap) {
         ctx.fillStyle = isP1 ? accent : '#8a8a96'; ctx.font = font(h * 0.21, 700, MONO);
-        ctx.fillText(isP1 ? 'LEADER' : leaderScore != null ? `−${fmt(leaderScore - t.score)}` : '', right, y + h * 0.75);
+        ctx.fillText(isP1 ? f.leaderWord : leaderScore != null ? `−${fmt(leaderScore - t.score)}` : '', right, y + h * 0.75);
       }
     } else if (o.gaps && t.score != null) {
       ctx.fillStyle = isP1 ? accent : '#c4c4cc'; ctx.font = font(h * 0.30, 800, MONO);
-      const g = isP1 ? 'LEADER' : leaderScore != null ? `−${fmt(leaderScore - t.score)}` : '';
+      const g = isP1 ? f.leaderWord : leaderScore != null ? `−${fmt(leaderScore - t.score)}` : '';
       ctx.fillText(g, right, y + h / 2); scoreW = ctx.measureText(g).width;
     }
     // Bonus chip.
@@ -344,7 +351,19 @@ if (copy) {
   });
 }
 
-document.addEventListener('race-loaded', event => { data = event.detail; draw(); updateAge(); });
+function syncScopes() {
+  const select = $('share-scope');
+  if (!select || !data) return;
+  const previous = select.value;
+  const scopes = (data.scopes || []).filter(s => s.type === 'total' || s.status !== 'upcoming');
+  select.replaceChildren(...scopes.map(s => {
+    const o = document.createElement('option'); o.value = s.key;
+    o.textContent = s.type === 'total' ? 'Grand Prix total' : `${s.name} · ${s.status === 'live' ? 'live' : 'final'}`;
+    return o;
+  }));
+  select.value = scopes.some(s => s.key === previous) ? previous : data.current_scope;
+}
+document.addEventListener('race-loaded', event => { data = event.detail; syncScopes(); draw(); updateAge(); });
 
 // Refresh all counts -------------------------------------------------------------
 // Queues every registered post for an immediate collection, follows the worker's
