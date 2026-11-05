@@ -6,6 +6,7 @@ Anything that cannot be verified with certainty goes to a manual review queue.
 """
 import csv
 import hashlib
+import itertools
 import io
 import json
 import logging
@@ -233,8 +234,14 @@ def tesseract(img):
     return run.stdout.decode('utf-8', 'ignore')
 
 
-def parse_id(text):
+def squash(text):
     s = re.sub(r'[^A-Z0-9]', '', text.upper())
+    return s if 16 <= len(s) <= 18 else None  # "N" or "NO" from "No." may be glued in front; a stray character may be inserted
+
+
+def parse_id(text):
+    """The 16-character ID inside one raw reading, when it is unambiguous."""
+    s = squash(text) or ''
     if len(s) == 18 and s[:2] in ('NO', 'N0'):
         s = s[2:]
     elif len(s) == 17 and s[0] == 'N':  # the lower-case "o" of "No." is outside the character whitelist
@@ -242,12 +249,37 @@ def parse_id(text):
     return s if ID_RE.fullmatch(s) else None
 
 
+def forms(reading):
+    """Every 16-character ID a raw reading can stand for: the "No." prefix and stray inserted characters
+    (the font is tightly spaced and OCR adds a character here and there) are removed in every possible way.
+    The true ID is among the forms of every reading that has no wrong character; a wrong one is in few."""
+    if not reading:
+        return set()
+    if len(reading) > 16 and reading[0] == 'N':  # "No." read as "N": always a prefix, never part of the ID
+        reading = reading[1:]
+    if len(reading) == 16:
+        return {reading}
+    return {''.join(ch for i, ch in enumerate(reading) if i not in drop)
+            for drop in itertools.combinations(range(len(reading)), len(reading) - 16)}
+
+
+def tally(readings):
+    """[(ID, number of readings that can stand for it)], best first; ties keep the order of the readings."""
+    votes, order = {}, []
+    for reading in readings:
+        for form in forms(reading):
+            if form not in votes:
+                votes[form] = 0
+                order.append(form)
+            votes[form] += 1
+    return sorted(((f, votes[f]) for f in order), key=lambda x: -x[1])
+
+
 def read_ids(im):
     """Independent OCR readings of the "No. <ID>" line: different heights, plain and binarised.
 
     The wide box tolerates a few pixels of misalignment. Three readings are taken first; when they
-    all agree that is enough, otherwise up to five more are added, because the font is tightly spaced
-    and a single reading can add or merge a character (a "W" read as "WA").
+    all agree that is enough, otherwise up to five more are added.
     """
     strip = crop(im, ID_BOX).convert('L')
 
@@ -256,16 +288,14 @@ def read_ids(im):
         img = ImageOps.autocontrast(strip.resize((round(strip.width * scale), round(strip.height * scale)), Image.LANCZOS))
         if binarise:
             img = img.point(lambda p: 255 if p > 150 else 0)
-        return parse_id(tesseract(ImageOps.expand(img, 24, fill=255)))
+        return squash(tesseract(ImageOps.expand(img, 24, fill=255)))
 
     plan = [(110, False), (150, True), (200, False), (110, True), (200, True), (150, False), (260, True), (130, True)]
     readings = []
     for i, (height, binarise) in enumerate(plan):
         readings.append(variant(height, binarise))
-        if i == 2 and readings[0] and len(set(readings)) == 1:
-            break
-        found = [r for r in readings if r]
-        if len(found) >= 4 and len(set(found)) == 1:
+        ranked = tally(readings)
+        if i >= 2 and ranked and ranked[0][1] == sum(1 for r in readings if r) >= 3 and len(ranked) == 1:
             break
     return readings
 
@@ -274,43 +304,52 @@ def consensus(readings):
     """The ID the readings agree on, or None. The leader needs two votes, more than half of the valid
     readings and a margin of two over the runner-up (unless every valid reading is identical)."""
     found = [r for r in readings if r]
-    if len(found) < 2:
+    ranked = tally(found)
+    if len(found) < 2 or not ranked:
         return None
-    top = max(set(found), key=found.count)
-    votes = found.count(top)
-    others = sorted((found.count(x) for x in set(found) if x != top), reverse=True)
-    if votes >= 2 and votes * 2 > len(found) and (not others or votes >= others[0] + 2 or votes == len(found)):
+    top, votes = ranked[0]
+    runner = ranked[1][1] if len(ranked) > 1 else 0
+    if votes >= 2 and votes * 2 > len(found) and (votes >= runner + 2 or votes == len(found)):
         return top
     return None
 
 
-CONFUSABLE = ('0OQD', '1IL', '5S', '8B', '2Z', '6G', 'A4', 'UV')
-FOLD = {ch: group[0] for group in CONFUSABLE for ch in group}
+CONFUSABLE = ('0OQD9', '1IL', '5S9', '8B', '2Z', '6G', 'A4', 'UV')  # groups overlap on purpose: 9 looks like 0 and like S
+
+
+def _classes():
+    classes = []
+    for group in CONFUSABLE:
+        merged = set(group)
+        for other in [c for c in classes if c & merged]:
+            merged |= other
+            classes.remove(other)
+        classes.append(merged)
+    return {ch: min(c) for c in classes for ch in c}
+
+
+FOLD = _classes()
+
+
+def fold(cert_id):
+    return ''.join(FOLD.get(ch, ch) for ch in cert_id or '')
 
 
 def unsure_guess(readings):
-    """The best guess when the OCR is not sure, or None when the readings differ in more than look-alike characters.
+    """The best guess when the OCR is not sure, or None when there is no basis for one.
 
-    A single valid reading, or readings that differ only in characters the OCR mixes up (O/0, I/1, S/5, B/8...),
-    still point to one certificate. The most frequent reading (the first among equals) is the guess.
+    Accepted: a single candidate, a candidate with more votes than any other, or candidates that differ
+    only in look-alike characters (O/0, I/1, S/5, B/8...). A tie between really different IDs is not guessed.
     """
-    found = [r for r in readings if r]
-    if not found:
+    ranked = tally([r for r in readings if r])
+    if not ranked:
         return None
-    top = max(found, key=found.count)
-    if all(FOLD.get(a, a) == FOLD.get(b, b) for r in set(found) for a, b in zip(r, top)):
+    top, votes = ranked[0]
+    if len(ranked) == 1 or votes > ranked[1][1]:
+        return top
+    if all(fold(other) == fold(top) for other, _ in ranked):
         return top
     return None
-
-
-def lookalikes(cert_id, limit=5):
-    """The ID with each look-alike character swapped (at most `limit` positions, so at most 2**limit IDs)."""
-    spots = [i for i, ch in enumerate(cert_id) if ch in FOLD][:limit]
-    out = {cert_id}
-    for i in spots:
-        group = next(g for g in CONFUSABLE if cert_id[i] in g)
-        out |= {v[:i] + alt + v[i + 1:] for v in out for alt in group}
-    return out
 
 
 # ---------------------------------------------------------------- identifiers
@@ -340,8 +379,8 @@ def decide_id(c, cert_id, sure):
     """Outcome of an ID once it is read: (status, reason). `sure` is False when the OCR did not fully confirm it.
 
     A sure ID is valid unless it is already counted or one character from a counted ID. An unsure ID is also
-    accepted when no look-alike variant of it (O for 0, I for 1...) is counted or one character from a counted
-    ID: the image already passed every other check, so the ID only has to be told apart from the others.
+    accepted when no counted ID is a look-alike of it (O for 0, 9 for S, I for 1...): the image already passed
+    every other check, so the ID only has to be told apart from the others.
     """
     same = exact_cert(c, cert_id)
     if same:
@@ -351,10 +390,10 @@ def decide_id(c, cert_id, sure):
         return 'manual', f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread"
     if sure:
         return 'valid', ''
-    for variant in sorted(lookalikes(cert_id) - {cert_id}):
-        twin = exact_cert(c, variant) and {'cert_id': variant} or near_cert(c, variant)
-        if twin:
-            return 'manual', f"The OCR is not sure of the ID and it could be {twin['cert_id']}, which is already counted"
+    c.create_function('fold', 1, fold)  # a scan of the counted IDs, only for the proofs the OCR is unsure about
+    twin = c.execute("SELECT cert_id FROM collab_proofs WHERE status='valid' AND fold(cert_id)=? LIMIT 1", (fold(cert_id),)).fetchone()
+    if twin:
+        return 'manual', f"The OCR is not sure of the ID and it could be {twin['cert_id']}, which is already counted"
     return 'valid', 'ID not fully confirmed by the OCR; no similar ID is counted'
 
 
@@ -431,17 +470,16 @@ def analyse(data, refs, partner=None):
         if fit < T_OK:
             return 'manual', f"The {partner['name']} image is unclear (similarity {fit:.2f})", None, fit, thumb
     readings = ocr_ids(im)
-    found = [r for r in readings if r]
-    if not found:
+    ranked = tally([r for r in readings if r])
+    if not ranked:
         return 'manual', 'Certificate ID not readable', None, last, thumb
-    best = consensus(found)
+    best = consensus(readings)
     if best:
         return 'ok', '', best, last, None
-    guess = max(found, key=found.count)  # the first reading among equals
-    likely = unsure_guess(found)
+    likely = unsure_guess(readings)
     if likely:  # decided by process() against the IDs already counted
-        return 'unsure', 'The OCR could not confirm the ID' if len(set(found)) == 1 else 'The OCR readings of the ID disagree', likely, last, thumb
-    return 'manual', 'The OCR readings of the ID disagree', guess, last, thumb
+        return 'unsure', 'The OCR could not confirm the ID' if len(ranked) == 1 else 'The OCR readings of the ID disagree', likely, last, thumb
+    return 'manual', 'The OCR readings of the ID disagree', ranked[0][0], last, thumb
 
 
 def ocr_ids(im):
@@ -673,9 +711,9 @@ def read_proof_id(proof_id):
         raise ValueError('There is no image to read for this proof')
     with SLOTS:
         readings = ocr_ids(im)
-    found = [r for r in readings if r]
     best = consensus(readings)
-    return {'cert_id': best or (max(found, key=found.count) if found else None), 'confident': bool(best)}
+    ranked = tally([r for r in readings if r])
+    return {'cert_id': best or (ranked[0][0] if ranked else None), 'confident': bool(best)}
 
 
 def reject(proof_id, actor):

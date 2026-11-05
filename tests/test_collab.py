@@ -405,6 +405,25 @@ class IdReading(unittest.TestCase):
         self.assertIsNone(collab.consensus([a, None, None]))          # a single reading is never enough
 
 
+class InsertedCharacters(unittest.TestCase):
+    def test_stray_characters_and_prefix_are_voted_away(self):
+        # real readings of 61101BRL9IMZRU9F: "No." glued in front, characters inserted or replaced
+        raw = ['N61101BRL9IMZRU9SF', 'N61101BRL9IMZRU9F', 'N61101BRL9OIMZRUSF', 'N61101BRL9IMZRU9OF',
+               'N61101BRL9IMZRU9F', 'N61101BRL9IMZRUSF', None, 'N61101BRL9OIMZRU9F']
+        self.assertEqual(collab.consensus(raw), '61101BRL9IMZRU9F')
+        self.assertEqual(collab.consensus(['N61105JDXSVKA6VXC'] * 3), '61105JDXSVKA6VXC')
+
+    def test_nine_and_zero_are_look_alikes(self):
+        self.assertEqual(collab.unsure_guess(['61105JDXSVKA6VX0', '61105JDXSVKA6VX9']), '61105JDXSVKA6VX0')
+        self.assertEqual(collab.unsure_guess(['61105JDXSVKA6VX9', '61105JDXSVKA6VXS']), '61105JDXSVKA6VX9')
+        self.assertIsNone(collab.unsure_guess(['61105JDXSVKA6VXK', '61105JDXSVKA6VX9']))
+
+    def test_weak_readings_give_a_guess_only_with_a_leader(self):
+        self.assertEqual(collab.unsure_guess(['N61101BRL9IMZRU9F', None, 'N61101BRL9IMZRUSF', 'N61101BRL9IMZRU9F']), '61101BRL9IMZRU9F')
+        self.assertIsNone(collab.unsure_guess(['CCCCCCCCCCCCCCCC', 'CCCCCCCCCCCCCCCK']))   # a tie between different IDs
+        self.assertIsNone(collab.unsure_guess([None, None]))
+
+
 class Reprocess(Base):
     def test_ocr_review_items_are_read_again(self):
         a, b, c, d = 'AAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBB', 'AAAAAAAAAAAAAAAC', 'DDDDDDDDDDDDDDDD'
