@@ -19,62 +19,83 @@
   <a class="brand" href="/collab-verify"><span class="brand-mark" aria-hidden="true">E1</span><span>Collab Verify</span></a>
   <nav class="top-links"><a class="public-link" href="/admin">Race admin</a><a class="public-link" href="/" target="_blank" rel="noopener">Public leaderboard ↗</a></nav>
 </header>
+<nav class="admin-tabs" role="tablist" aria-label="Collab verifier">
+  <button id="setup-tab" type="button" role="tab" aria-selected="true" aria-controls="setup-panel" tabindex="0" data-tab="setup"><span class="step">1</span>Setup</button>
+  <button id="upload-tab" type="button" role="tab" aria-selected="false" aria-controls="upload-panel" tabindex="-1" data-tab="upload"><span class="step">2</span>Upload</button>
+  <button id="review-tab" type="button" role="tab" aria-selected="false" aria-controls="review-panel" tabindex="-1" data-tab="review"><span class="step">3</span>Review <span id="review-count" class="tab-badge"></span></button>
+  <button id="recap-tab" type="button" role="tab" aria-selected="false" aria-controls="recap-panel" tabindex="-1" data-tab="recap"><span class="step">4</span>Recap</button>
+</nav>
 <main>
   <div id="ocr-banner" class="banner is-error" role="alert" hidden><div><strong>OCR engine not installed</strong><p>The server cannot read certificate IDs. Rebuild the Docker image (it installs tesseract) before uploading proofs.</p></div></div>
-  <p class="intro">Counts valid ENHYPEN voting proofs sent by partner fandoms. A proof is valid when the last image of the Mnet Plus certificate is ENHYPEN and its certificate ID has not been counted before. Anything that cannot be verified with certainty waits in the manual review queue.</p>
 
-  <section aria-labelledby="refs-heading" class="block">
-    <h2 id="refs-heading">1. ENHYPEN reference</h2>
-    <p class="section-note">Upload one or more <strong>correct</strong> certificates (ENHYPEN as the last image). Their last image is the comparison target. If that photo changes between categories or rounds, add one reference for each version.</p>
-    <div id="refs" class="refs"></div>
-    <div class="row">
-      <label class="grow">Label <span class="optional">optional</span><input id="ref-label" maxlength="80" placeholder="e.g. Fans' Choice round 2" autocomplete="off"></label>
-      <label class="grow">Certificate image<input id="ref-file" type="file" accept="image/*" multiple></label>
+  <section id="setup-panel" role="tabpanel" aria-labelledby="setup-tab">
+    <p class="intro">Counts valid ENHYPEN voting proofs sent by partner fandoms. A proof is valid when ENHYPEN is the last image of the Mnet Plus certificate, the partner's own image is where it should be, and the certificate ID has not been counted before. Anything that cannot be verified with certainty waits in the Review tab.</p>
+
+    <div class="block">
+      <h2>ENHYPEN reference</h2>
+      <p class="section-note">Shared by every collab. Add one or more <strong>correct</strong> certificates (ENHYPEN as the last image); a full phone screenshot of the certificate works as well. If that photo changes between categories or rounds, add one for each version.</p>
+      <div id="refs" class="refs"></div>
+      <div class="add-row">
+        <label class="grow">Label <span class="optional">optional</span><input id="ref-label" maxlength="80" placeholder="e.g. Fans' Choice round 2" autocomplete="off"></label>
+        <label class="picker compact"><input id="ref-file" type="file" accept="image/*" multiple><span class="picker-btn">Add certificate</span><span class="picker-note">PNG, JPG or WebP</span></label>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>Collabs</h2>
+      <p class="section-note">Each partner fandom sends its own kind of certificate. Define the collab and where its own image sits (for example the first image); ENHYPEN is always the last. Then add a sample certificate as its reference. A collab without a partner image is checked for ENHYPEN only.</p>
+      <div id="collabs" class="collabs"></div>
+      <form id="collab-form">
+        <h3>Add collab</h3>
+        <div class="grid-2">
+          <label>Collab name<input id="collab-name" maxlength="80" required autocomplete="off" placeholder="e.g. Taeyeon fandom"></label>
+          <label>Where is the partner image?<select id="collab-slots"><option value="0">First image</option><option value="1">Second image</option><option value="0,1">First or second image</option><option value="">No partner image (ENHYPEN only)</option></select></label>
+        </div>
+        <div class="form-actions"><button type="submit">Add collab</button></div>
+      </form>
     </div>
   </section>
 
-  <section aria-labelledby="collabs-heading" class="block">
-    <h2 id="collabs-heading">2. Collabs</h2>
-    <p class="section-note">Each partner fandom sends its own kind of certificate. Define the collab and where its own image sits on the certificate (for example the first image); ENHYPEN must always be the last. Then add a sample certificate for that collab as its reference. A collab without a partner image is checked for ENHYPEN only.</p>
-    <div id="collabs" class="collabs"></div>
-    <form id="collab-form">
-      <h3>Add collab</h3>
-      <div class="row">
-        <label class="grow">Collab name<input id="collab-name" maxlength="80" required autocomplete="off" placeholder="e.g. Taeyeon fandom"></label>
-        <label class="grow">Where is the partner image?<select id="collab-slots"><option value="0">First image</option><option value="1">Second image</option><option value="0,1">First or second image</option><option value="">No partner image (ENHYPEN only)</option></select></label>
+  <section id="upload-panel" role="tabpanel" aria-labelledby="upload-tab" hidden>
+    <div class="block">
+      <h2>Upload proofs</h2>
+      <p class="section-note">Choose the collab and the date the votes refer to, then pick a folder (best for thousands of files, sub-folders included) or individual images. Exported certificates and full phone screenshots of the certificate can be mixed. Files already processed are skipped, so after an interruption you can pick the same folder again and continue.</p>
+      <form id="upload-form">
+        <div class="grid-2">
+          <label>Collab<select id="collab" required></select><small class="field-hint" id="collab-hint"></small></label>
+          <label>Proofs date<input id="proofs-date" type="date" required><small class="field-hint">The date the votes refer to. The recap and the exports are grouped by it.</small></label>
+        </div>
+        <div class="pickers">
+          <label class="picker"><input id="folder" type="file" webkitdirectory multiple><span class="picker-title">Folder</span><span class="picker-btn">Choose folder</span><span class="picker-note" id="folder-note">No folder selected</span></label>
+          <label class="picker"><input id="files" type="file" accept="image/*" multiple><span class="picker-title">Individual images</span><span class="picker-btn">Choose images</span><span class="picker-note" id="files-note">No images selected</span></label>
+        </div>
+        <div class="form-actions"><button id="start" type="submit">Start verification</button><button id="stop" type="button" class="btn-ghost" hidden>Stop</button></div>
+      </form>
+      <div id="run" hidden>
+        <div class="bar" role="progressbar" aria-label="Verification progress" aria-valuemin="0" aria-valuemax="100" id="run-bar"><span id="run-fill"></span></div>
+        <p id="run-text" class="run-text" aria-live="polite"></p>
+        <p id="run-chips" class="chips"></p>
+        <ul id="run-errors" class="run-errors"></ul>
       </div>
-      <div class="form-actions"><button type="submit">Add collab</button></div>
-    </form>
-  </section>
-
-  <section aria-labelledby="upload-heading" class="block">
-    <h2 id="upload-heading">3. Upload proofs</h2>
-    <p class="section-note">Choose a folder (best for thousands of files) or individual screenshots. Files already processed are skipped, so after an interruption you can select the same folder again and continue.</p>
-    <form id="upload-form">
-      <label>Collab<select id="collab" required></select><small class="field-hint" id="collab-hint"></small></label>
-      <div class="row">
-        <label class="grow">Folder<input id="folder" type="file" webkitdirectory multiple></label>
-        <label class="grow">Individual images<input id="files" type="file" accept="image/*" multiple></label>
-      </div>
-      <div class="form-actions"><button id="start" type="submit">Start verification</button><button id="stop" type="button" class="btn-ghost" hidden>Stop</button></div>
-    </form>
-    <div id="run" hidden>
-      <div class="bar" role="progressbar" aria-label="Verification progress" aria-valuemin="0" aria-valuemax="100" id="run-bar"><span id="run-fill"></span></div>
-      <p id="run-text" class="run-text" aria-live="polite"></p>
-      <p id="run-chips" class="chips"></p>
-      <ul id="run-errors" class="run-errors"></ul>
     </div>
   </section>
 
-  <section aria-labelledby="summary-heading" class="block">
-    <div class="head-row"><h2 id="summary-heading">Valid proofs</h2>
-      <span class="head-actions"><button id="csv-summary" class="btn-ghost" type="button">Export summary CSV</button><button id="csv-full" class="btn-ghost" type="button">Export full report CSV</button></span></div>
-    <div class="scroll"><table id="summary-table"><thead><tr><th>Fandom collab</th><th class="num">Valid proofs</th><th>Date</th><th class="num">Files</th><th class="num">Duplicates</th><th class="num">Not ENHYPEN</th><th class="num">Wrong partner image</th><th class="num">Manual queue</th><th class="num">Rejected</th></tr></thead><tbody id="summary-body"></tbody></table></div>
-  </section>
-
-  <section aria-labelledby="queue-heading" class="block">
-    <div class="head-row"><h2 id="queue-heading">Manual review <span id="queue-count" class="tab-badge"></span></h2><span class="pager"><button id="prev" class="btn-ghost" type="button">← Previous</button><span id="page-info" class="muted"></span><button id="next" class="btn-ghost" type="button">Next →</button></span></div>
+  <section id="review-panel" role="tabpanel" aria-labelledby="review-tab" hidden>
+    <div class="head-row"><h2>Manual review</h2><span class="pager"><button id="prev" class="btn-ghost" type="button">← Previous</button><span id="page-info" class="muted"></span><button id="next" class="btn-ghost" type="button">Next →</button></span></div>
+    <p class="section-note">Proofs the system could not verify with certainty: correct the ID if needed, then accept or reject. A one-character-different ID needs a second click to confirm it is a different certificate.</p>
     <div id="queue"></div>
+  </section>
+
+  <section id="recap-panel" role="tabpanel" aria-labelledby="recap-tab" hidden>
+    <div class="head-row"><h2>Recap</h2>
+      <span class="head-actions">
+        <label class="inline-field">Proofs date<select id="recap-day"></select></label>
+        <button id="csv-summary" class="btn-ghost" type="button">Download summary CSV</button>
+        <button id="csv-full" class="btn-ghost" type="button">Download full report CSV</button>
+      </span></div>
+    <div id="tiles" class="tiles"></div>
+    <div class="scroll"><table id="summary-table"><thead><tr><th>Fandom collab</th><th class="num">Valid proofs</th><th>Date</th><th class="num">Files</th><th class="num">Duplicates</th><th class="num">Not ENHYPEN</th><th class="num">Wrong partner image</th><th class="num">To review</th><th class="num">Rejected</th></tr></thead><tbody id="summary-body"></tbody></table></div>
+    <p class="section-note">The downloads follow the selected proofs date, and the file name carries it.</p>
   </section>
 </main>
 </body>

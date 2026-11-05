@@ -8,6 +8,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -39,6 +40,11 @@ RATIO = 930 / 1410  # Mnet Plus certificate width / height
 THUMB_SLOTS = [(81 / 930, 443 / 1410, 321 / 930, 683 / 1410), (345 / 930, 443 / 1410, 585 / 930, 683 / 1410),
                (609 / 930, 443 / 1410, 849 / 930, 683 / 1410)]
 ID_BOX = (0.125, 0.903, 0.585, 0.959)
+# Phone screenshots: the card is rendered a few pixels off the export layout, so the card found in the
+# screenshot is padded to the export frame and thumbnails are compared over a small window of offsets.
+SHOT_TOP, SHOT_BOTTOM = -0.0055, 0.001   # frame edges relative to the detected card height
+SHOT_SHIFTS = tuple((dx * 0.0025, dy * 0.0025) for dx in range(-4, 5) for dy in range(-4, 5))
+NO_SHIFT = ((0.0, 0.0),)
 ID_RE = re.compile(r'[A-Z0-9]{16}')
 ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 STATUSES = ('valid', 'duplicate', 'not_enhypen', 'not_partner', 'manual', 'rejected')
@@ -46,8 +52,8 @@ SLOT_WORD = ('first', 'second', 'last')
 RAW_POSTS = ('/api/collab/upload', '/api/collab/ref')
 
 
-def init(c):
-    c.executescript('''
+SCHEMA_VERSION = 3
+SCHEMA = '''
     -- A collab is a partner fandom. Its batches must show the partner image in one of `slots`
     -- (0 = first, 1 = second) in addition to ENHYPEN as the last image. No slots = ENHYPEN only.
     CREATE TABLE IF NOT EXISTS collab_collabs(id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -72,7 +78,46 @@ def init(c):
     -- that differ by exactly one character (likely OCR misreads or doctored codes).
     CREATE TABLE IF NOT EXISTS collab_mask(k TEXT NOT NULL, cert_id TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS collab_mask_k ON collab_mask(k);
-    ''')
+    '''
+
+
+def init(c):
+    c.execute('CREATE TABLE IF NOT EXISTS collab_meta(k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    version = c.execute("SELECT v FROM collab_meta WHERE k='schema'").fetchone()
+    if version is None and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='collab_proofs'").fetchone():
+        upgrade_legacy(c)
+    c.executescript(SCHEMA)
+    c.execute("INSERT OR REPLACE INTO collab_meta(k,v) VALUES('schema',?)", (str(SCHEMA_VERSION),))
+
+
+def upgrade_legacy(c):
+    """One-time upgrade of tables created by the first versions of this module (no schema marker).
+
+    Collabs and reference images are kept. Every uploaded proof, its submission rows and the
+    duplicate index are deleted: those were test uploads made while the module was being tried out.
+    """
+    removed = c.execute('SELECT count(*) FROM collab_proofs').fetchone()[0]
+    exists = lambda name: c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+    collabs = [dict(r) for r in c.execute('SELECT * FROM collab_collabs')] if exists('collab_collabs') else []
+    refs = [dict(r) for r in c.execute('SELECT * FROM collab_refs')] if exists('collab_refs') else []
+    for table in ('collab_mask', 'collab_proofs', 'collab_submissions', 'collab_refs', 'collab_collabs'):
+        c.execute(f'DROP TABLE IF EXISTS {table}')
+    c.executescript(SCHEMA)
+    for x in collabs:
+        c.execute('INSERT INTO collab_collabs(id,name,slots,created_at) VALUES(?,?,?,?)', (x['id'], x['name'], x['slots'], x['created_at']))
+    for x in refs:
+        c.execute('INSERT INTO collab_refs(id,collab_id,label,vec,thumb,created_at) VALUES(?,?,?,?,?,?)',
+                  (x['id'], x.get('collab_id'), x['label'], x['vec'], x['thumb'], x['created_at']))
+    logging.warning('Collab verifier upgrade: removed %d uploaded test proofs; kept %d collabs and %d references', removed, len(collabs), len(refs))
+
+
+def reset_proofs():
+    """Deletes every uploaded proof and its submission rows. Collabs and reference images are kept."""
+    with storage.connection() as c:
+        removed = c.execute('SELECT count(*) FROM collab_proofs').fetchone()[0]
+        for table in ('collab_mask', 'collab_proofs', 'collab_submissions'):
+            c.execute(f'DELETE FROM {table}')
+    return removed
 
 
 # ---------------------------------------------------------------- image analysis
@@ -96,10 +141,10 @@ def crop(im, box):
     return im.crop((round(box[0] * w), round(box[1] * h), round(box[2] * w), round(box[3] * h)))
 
 
-def slot_vector(im, slot):
+def slot_vector(im, slot, dx=0.0, dy=0.0):
     box = THUMB_SLOTS[slot]
     mx, my = (box[2] - box[0]) * 0.1, (box[3] - box[1]) * 0.1  # trims the rounded corners
-    small = crop(im, (box[0] + mx, box[1] + my, box[2] - mx, box[3] - my)).resize((24, 24), Image.LANCZOS)
+    small = crop(im, (box[0] + mx + dx, box[1] + my + dy, box[2] - mx + dx, box[3] - my + dy)).resize((24, 24), Image.LANCZOS)
     values = list(small.tobytes())
     mean = sum(values) / len(values)
     values = [v - mean for v in values]
@@ -109,6 +154,60 @@ def slot_vector(im, slot):
 
 def correlation(a, b):
     return sum(x * y for x, y in zip(a, b))
+
+
+def runs(fractions, minimum, gap):
+    """(start, end) of the stretches where fractions >= minimum, bridging gaps of up to `gap` entries."""
+    found, start, last, missed = [], None, 0, 0
+    for i, v in enumerate(list(fractions) + [0] * (gap + 1)):
+        if v >= minimum:
+            if start is None:
+                start = i
+            last, missed = i, 0
+        elif start is not None:
+            missed += 1
+            if missed > gap:
+                found.append((start, last + 1))
+                start = None
+    return found
+
+
+def find_card(im):
+    """Box of the certificate card inside a phone screenshot, or None.
+
+    The card is the only large tinted (non-white, non-grey) area with the certificate proportions;
+    the status bar, ad banners and buttons are white or grey.
+    """
+    scale = min(1.0, 540 / im.width)
+    small = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.BOX)
+    mask = small.convert('HSV').getchannel('S').point(lambda v: 255 if v > 10 else 0)
+    w, h = mask.size
+    best = None
+    for y0, y1 in runs([v / 255 for v in mask.resize((1, h), Image.BOX).tobytes()], 0.25, max(2, h // 40)):
+        band = mask.crop((0, y0, w, y1))
+        for x0, x1 in runs([v / 255 for v in band.resize((w, 1), Image.BOX).tobytes()], 0.4, max(2, w // 60)):
+            if x1 - x0 < w * 0.4 or abs((x1 - x0) / (y1 - y0) / RATIO - 1) > 0.04:
+                continue
+            if best is None or (x1 - x0) * (y1 - y0) > best[0]:
+                best = ((x1 - x0) * (y1 - y0), (x0, y0, x1, y1))
+    if not best:
+        return None
+    return tuple(round(v / scale) for v in best[1])
+
+
+def normalise(im):
+    """(image, from_screenshot). A phone screenshot is cut down to the certificate card; anything else is returned as is."""
+    if layout_ok(im):
+        return im, False
+    box = find_card(im)
+    if not box:
+        return im, False
+    x0, y0, x1, y1 = box
+    height = y1 - y0
+    top, bottom = max(0, round(y0 + SHOT_TOP * height)), min(im.height, round(y1 + SHOT_BOTTOM * height))
+    centre, width = (x0 + x1) / 2, (bottom - top) * RATIO
+    left, right = max(0, round(centre - width / 2)), min(im.width, round(centre + width / 2))
+    return im.crop((left, top, right, bottom)), True
 
 
 def layout_ok(im):
@@ -190,8 +289,19 @@ def today():
     return datetime.now(TZ).strftime('%Y-%m-%d')
 
 
-def submission(c, fandom):
-    day = today()
+def proofs_day(value):
+    """The date the votes refer to (not necessarily the upload day). Defaults to today."""
+    day = clean(value, 10) or today()
+    try:
+        datetime.strptime(day, '%Y-%m-%d')
+    except ValueError:
+        raise ValueError('The proofs date must be a valid date (YYYY-MM-DD)')
+    if day > today():
+        raise ValueError('The proofs date cannot be in the future')
+    return day
+
+
+def submission(c, fandom, day):
     c.execute('INSERT OR IGNORE INTO collab_submissions(fandom,day,created_at) VALUES(?,?,?)', (fandom, day, time.time()))
     return c.execute('SELECT id,fandom,day FROM collab_submissions WHERE fandom=? AND day=?', (fandom, day)).fetchone()
 
@@ -215,20 +325,29 @@ def analyse(data, refs, partner=None):
     im = open_image(data)
     if im is None:
         return 'manual', 'Cannot open the image', None, None, None
-    vecs = [slot_vector(im, slot) for slot in range(3)]
-    sims = [[correlation(v, r) for r in refs] for v in vecs]
-    last = max(sims[2])
+    im, screenshot = normalise(im)  # a phone screenshot is reduced to the certificate card
+    shifts = SHOT_SHIFTS if screenshot else NO_SHIFT
+
+    def match(slot, targets):
+        """Best similarity of one thumbnail with any target; screenshots are tried at a few small offsets."""
+        best = -1.0
+        for dx, dy in shifts:
+            v = slot_vector(im, slot, dx, dy)
+            best = max(best, max(correlation(v, t) for t in targets))
+        return best
+
+    last = match(2, refs)
     trusted = layout_ok(im)
     thumb = jpeg(im, 640, 65)
     if trusted and last < T_LOW:
-        other = max(max(sims[0]), max(sims[1]))
+        other = max(match(0, refs), match(1, refs))
         reason = 'ENHYPEN is not the last image' if other >= T_OK else 'The last image is not ENHYPEN'
         return 'not_enhypen', reason, None, last, thumb
     if last < T_OK:
         reason = f'The last image is unclear (similarity {last:.2f})' if trusted else 'Non-standard layout (cropped screenshot?)'
         return 'manual', reason, None, last, thumb
     if partner:
-        fit = max(correlation(vecs[slot], v) for slot in partner['slots'] for v in partner['vecs'])
+        fit = max(match(slot, partner['vecs']) for slot in partner['slots'])
         if fit < T_LOW:
             return 'not_partner', f"The {partner['name']} image is not in the {where(partner['slots'])} position", None, fit, thumb
         if fit < T_OK:
@@ -251,8 +370,9 @@ def ocr_ids(im):
     return read_ids(im)
 
 
-def process(fandom, file_name, file_key, data, actor):
+def process(fandom, file_name, file_key, data, actor, day=None):
     fandom, file_name, file_key = clean(fandom, 80), clean(file_name, 300), clean(file_key, 500)
+    day = proofs_day(day)
     if not fandom:
         raise ValueError('Fandom collab name is required')
     if not file_key:
@@ -288,7 +408,7 @@ def process(fandom, file_name, file_key, data, actor):
         again = existing(c, file_key)
         if again:
             return again
-        sub = submission(c, fandom)
+        sub = submission(c, fandom, day)
         if status == 'ok':
             thumb = None
             twin = c.execute('''SELECT s.fandom,s.day FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id
@@ -300,7 +420,7 @@ def process(fandom, file_name, file_key, data, actor):
                 status, reason = 'duplicate', f"Already counted for {holder['fandom']} on {holder['day']}"
             elif near:
                 status, reason = 'manual', f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread"
-                thumb = jpeg(open_image(data), 640, 65)
+                thumb = jpeg(normalise(open_image(data))[0], 640, 65)
             else:
                 status = 'valid'
         cur = c.execute('''INSERT INTO collab_proofs(submission_id,file_key,file_name,sha256,cert_id,status,reason,similarity,thumb,created_at)
@@ -314,8 +434,9 @@ def process(fandom, file_name, file_key, data, actor):
 def add_reference(label, data, collab_id=None, slot=None):
     """ENHYPEN reference (collab_id None: its last image) or a collab's partner reference (slot: where it sits in the sample)."""
     im = open_image(data)
+    im = normalise(im)[0] if im is not None else None  # a full phone screenshot of the certificate is accepted too
     if im is None or not layout_ok(im):
-        raise ValueError('Use a full, uncropped certificate image exported from Mnet Plus')
+        raise ValueError('Use a full, uncropped certificate image or a phone screenshot that shows the whole certificate card')
     with storage.connection() as c:
         if collab_id is None:
             slot, label = 2, clean(label, 80) or 'ENHYPEN'
@@ -393,21 +514,27 @@ def known(keys):
     return found
 
 
-def export_csv(kind):
+def export_csv(kind, day=''):
     out = io.StringIO()
     writer = csv.writer(out)
+    where_day, args = ('WHERE s.day=?', (day,)) if day else ('', ())
     with storage.connection() as c:
         if kind == 'full':
             writer.writerow(['fandom_collab', 'date', 'file', 'certificate_id', 'result', 'reason', 'reviewed_by'])
-            for r in c.execute('''SELECT s.fandom,s.day,p.file_name,p.cert_id,p.status,p.reason,p.reviewed_by FROM collab_proofs p
-                JOIN collab_submissions s ON s.id=p.submission_id ORDER BY s.day,s.fandom COLLATE NOCASE,p.id'''):
+            for r in c.execute(f'''SELECT s.fandom,s.day,p.file_name,p.cert_id,p.status,p.reason,p.reviewed_by FROM collab_proofs p
+                JOIN collab_submissions s ON s.id=p.submission_id {where_day} ORDER BY s.day,s.fandom COLLATE NOCASE,p.id''', args):
                 writer.writerow(list(r))
         else:
             writer.writerow(['Fandom collab', 'Valid proofs', 'Date'])
-            for r in c.execute('''SELECT s.fandom, coalesce(sum(p.status='valid'),0), s.day FROM collab_submissions s
-                LEFT JOIN collab_proofs p ON p.submission_id=s.id GROUP BY s.id ORDER BY s.day,s.fandom COLLATE NOCASE'''):
+            for r in c.execute(f'''SELECT s.fandom, coalesce(sum(p.status='valid'),0), s.day FROM collab_submissions s
+                LEFT JOIN collab_proofs p ON p.submission_id=s.id {where_day} GROUP BY s.id ORDER BY s.day,s.fandom COLLATE NOCASE''', args):
                 writer.writerow(list(r))
     return out.getvalue()
+
+
+def export_name(kind, day):
+    base = 'mama-proofs-report' if kind == 'full' else 'mama-valid-proofs'
+    return f"{base}-{day}.csv" if day else f"{base}-all-as-of-{today()}.csv"
 
 
 # ---------------------------------------------------------------- review
@@ -453,8 +580,12 @@ def get(path, query):
         offset = max(0, int((query.get('offset') or ['0'])[0]))
         return 200, queue(offset, min(50, max(1, int((query.get('limit') or ['10'])[0])))), 'application/json; charset=utf-8'
     if path == '/api/collab/export.csv':
-        kind = (query.get('kind') or ['summary'])[0]
-        return 200, export_csv('full' if kind == 'full' else 'summary'), 'text/csv; charset=utf-8'
+        kind = 'full' if (query.get('kind') or [''])[0] == 'full' else 'summary'
+        day = clean((query.get('day') or [''])[0], 10)
+        if day:
+            day = proofs_day(day)
+        headers = {'Content-Disposition': f'attachment; filename="{export_name(kind, day)}"'}
+        return 200, export_csv(kind, day), 'text/csv; charset=utf-8', headers
     match = re.fullmatch(r'/api/collab/(proofs|refs)/(\d+)/image', path)
     if match:
         sql = {'proofs': 'SELECT thumb FROM collab_proofs WHERE id=?', 'refs': 'SELECT thumb FROM collab_refs WHERE id=?'}[match[1]]
@@ -469,7 +600,7 @@ def get(path, query):
 def post_raw(path, query, data, actor):
     first = lambda name: (query.get(name) or [''])[0]
     if path == '/api/collab/upload':
-        return process(first('fandom'), first('name'), first('key'), data, actor)
+        return process(first('fandom'), first('name'), first('key'), data, actor, first('day'))
     if path == '/api/collab/ref':
         collab_id = first('collab')
         if collab_id:
@@ -500,3 +631,11 @@ def mutate(path, payload, actor):
             c.execute('DELETE FROM collab_refs WHERE id=?', (match[1],))
         return {'ok': True}
     raise ValueError('Unknown request')
+
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv[1:] == ['reset-proofs', '--yes']:
+        print(f'Deleted {reset_proofs()} uploaded proofs. Collabs and reference images were kept.')
+    else:
+        print('Usage: python collab.py reset-proofs --yes   (deletes every uploaded proof; keeps collabs and references)')

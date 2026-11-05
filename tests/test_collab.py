@@ -42,6 +42,27 @@ def certificate(last_seed=1, size=(930, 1410), text=None, extra=0, first_seed=10
     return out.getvalue()
 
 
+def screenshot(cert, size=(1080, 2280), card_width=804, top=650, colored_ad=False, bare=False):
+    """A phone screenshot of a certificate: status bar, ad banner, the card, a save button."""
+    page = Image.new('RGB', size, (255, 255, 255))
+    draw = ImageDraw.Draw(page)
+    draw.rectangle([0, 0, size[0], 90], fill=(245, 245, 245))                   # status bar
+    if not bare:
+        draw.rectangle([0, 250, size[0], 590], fill=(255, 120, 60) if colored_ad else (225, 225, 225))  # ad banner
+    # Phones draw the visible card slightly inside the exported frame (measured on a real screenshot:
+    # 804x1224 visible against a 812x1232 frame, starting 7 px lower).
+    frame = Image.open(io.BytesIO(cert)).convert('RGB')
+    scale = card_width / 804
+    frame = frame.resize((round(812 * scale), round(1232 * scale)), Image.LANCZOS)
+    left, up = round(4 * scale), round(7 * scale)
+    card = frame.crop((left, up, left + card_width, up + round(1224 * scale)))
+    page.paste(card, ((size[0] - card_width) // 2, top))
+    draw.rounded_rectangle([300, 2000, 780, 2090], 20, fill=(20, 20, 20))       # "Save image"
+    out = io.BytesIO()
+    page.save(out, 'PNG')
+    return out.getvalue()
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -244,6 +265,11 @@ class HTTP(Base):
         with response:
             return response.status, response.read()
 
+    def test_export_download_has_dated_filename(self):
+        with urllib.request.urlopen(urllib.request.Request(self.base + '/api/collab/export.csv?kind=summary&day=2026-11-01', headers={
+                'Authorization': 'Basic ' + base64.b64encode(f'{app.USERNAME}:{app.PASSWORD}'.encode()).decode()})) as r:
+            self.assertIn('mama-valid-proofs-2026-11-01.csv', r.headers['Content-Disposition'])
+
     def test_requires_authentication(self):
         for path in ('/collab-verify', '/api/collab/summary', '/api/collab/proofs/1/image'):
             self.assertEqual(self.call(path, auth=False)[0], 401)
@@ -292,11 +318,97 @@ class HTTP(Base):
         self.assertEqual(self.call('/api/collab/proofs/999/approve', {'cert_id': '1234567890ABCDEF'})[0], 400)
 
 
+class Screenshots(Base):
+    LINGSHOT = 20
+
+    def test_a_screenshot_counts_like_a_certificate(self):
+        self.assertEqual(self.send(screenshot(certificate(1)), 's1')['status'], 'valid')
+        again = self.send(certificate(1, extra=9), 'c1', fandom='Fandom B')   # same ID as a real certificate
+        self.assertEqual(again['status'], 'duplicate')
+
+    def test_screenshot_with_another_last_image_is_rejected(self):
+        self.assertEqual(self.send(screenshot(certificate(2)), 's2')['status'], 'not_enhypen')
+
+    def test_other_phones_and_a_colourful_ad(self):
+        for i, kwargs in enumerate([dict(size=(720, 1560), card_width=536, top=430), dict(size=(1440, 3120), card_width=1100, top=900),
+                                    dict(colored_ad=True), dict(bare=True)]):
+            ids = (['AAAAAAAAAAAAAAAA', 'BCDEFGHJKLMNPQRS', 'KLMNPQRSTUVWXYZ2', 'Z9Y8X7W6V5U4T3S2'][i],) * 2  # unrelated IDs: no near-duplicates
+            self.assertEqual(self.send(screenshot(certificate(1), **kwargs), f's{i}', ids=ids)['status'], 'valid', kwargs)
+
+    def test_partner_image_is_checked_in_screenshots_too(self):
+        lingshot = collab.create_collab('Lingshot', [0])['id']
+        collab.add_reference('Lingshot', screenshot(certificate(1, first_seed=self.LINGSHOT)), lingshot, 0)   # a screenshot works as a sample
+        self.assertEqual(self.send(screenshot(certificate(1, first_seed=self.LINGSHOT)), 'a', fandom='Lingshot')['status'], 'valid')
+        self.assertEqual(self.send(certificate(1, first_seed=self.LINGSHOT, extra=4), 'b', ids=('BBBBBBBBBBBBBBBB',) * 2, fandom='Lingshot')['status'], 'valid')
+        self.assertEqual(self.send(screenshot(certificate(1, first_seed=77)), 'c', ids=('CCCCCCCCCCCCCCCC',) * 2, fandom='Lingshot')['status'], 'not_partner')
+
+    def test_screenshot_without_the_card_goes_to_manual_review(self):
+        page = Image.new('RGB', (1080, 2280), (255, 255, 255))
+        out = io.BytesIO()
+        page.save(out, 'PNG')
+        result = self.send(out.getvalue(), 'blank')
+        self.assertEqual(result['status'], 'manual')
+        self.assertIn('Non-standard layout', result['reason'])
+
+    def test_card_is_located(self):
+        im = Image.open(io.BytesIO(screenshot(certificate(1))))
+        x0, y0, x1, y1 = collab.find_card(im)
+        self.assertTrue(abs(x0 - 138) <= 4 and abs(x1 - 942) <= 4 and abs(y0 - 650) <= 4, (x0, y0, x1, y1))
+        self.assertIsNone(collab.find_card(Image.new('RGB', (1080, 2280), (255, 255, 255))))
+        self.assertFalse(collab.normalise(Image.open(io.BytesIO(certificate(1))).convert('RGB'))[1])  # real certificates pass through
+
+
+class Cleanup(Base):
+    def test_reset_proofs_keeps_collabs_and_references(self):
+        self.send(certificate(1, extra=3), 'a')
+        self.assertEqual(collab.summary()['submissions'][0]['valid'], 1)
+        self.assertEqual(collab.reset_proofs(), 1)
+        info = collab.summary()
+        self.assertEqual(info['submissions'], [])
+        self.assertEqual(len(info['collabs']), 6)
+        self.assertEqual(len(info['refs']), 1)
+        self.assertEqual(self.send(certificate(1, extra=3), 'b')['status'], 'valid')
+
+    def test_legacy_tables_are_upgraded_and_test_proofs_removed(self):
+        self.send(certificate(1, extra=3), 'a')
+        with storage.connection() as c:
+            c.execute("DELETE FROM collab_meta WHERE k='schema'")  # looks like a pre-versioning database
+            collab.init(c)
+            self.assertEqual(c.execute('SELECT count(*) FROM collab_proofs').fetchone()[0], 0)
+            self.assertEqual(c.execute('SELECT count(*) FROM collab_collabs').fetchone()[0], 6)
+            self.assertEqual(c.execute('SELECT count(*) FROM collab_refs').fetchone()[0], 1)
+        self.assertEqual(self.send(certificate(1, extra=4), 'b')['status'], 'valid')
+        with storage.connection() as c:
+            collab.init(c)  # a normal restart must not delete anything
+            self.assertEqual(c.execute('SELECT count(*) FROM collab_proofs').fetchone()[0], 1)
+
+    def test_proofs_day(self):
+        self.assertEqual(collab.proofs_day(''), collab.today())
+        self.assertEqual(collab.proofs_day('2026-11-01'), '2026-11-01')
+        for bad in ('2026-13-40', 'yesterday', '2999-01-01'):
+            with self.assertRaises(ValueError):
+                collab.proofs_day(bad)
+
+    def test_exports_filter_by_day(self):
+        with patch.object(collab, 'ocr_ids', return_value=('BBBBBBBBBBBBBBBB',) * 2):
+            collab.process('Fandom A', 'a.png', 'k1', certificate(1, extra=3), 'admin', '2026-11-01')
+        with patch.object(collab, 'ocr_ids', return_value=('CCCCCCCCCCCCCCCC',) * 2):
+            collab.process('Fandom A', 'b.png', 'k2', certificate(1, extra=4), 'admin', '2026-11-02')
+        self.assertEqual(collab.export_csv('summary', '2026-11-01').strip().splitlines(), ['Fandom collab,Valid proofs,Date', 'Fandom A,1,2026-11-01'])
+        self.assertEqual(len(collab.export_csv('summary').strip().splitlines()), 3)
+        self.assertEqual(collab.export_name('summary', '2026-11-01'), 'mama-valid-proofs-2026-11-01.csv')
+        self.assertTrue(collab.export_name('full', '').startswith('mama-proofs-report-all-as-of-'))
+
+
 @unittest.skipUnless(shutil.which('tesseract') and __import__('os').path.exists('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'), 'tesseract or font not available')
 class RealOCR(Base):
     def test_reads_the_id_line(self):
         result = collab.process('Fandom A', 'x.png', 'x', certificate(1, text='61105JDXSVKA6VXC'), 'admin')
         self.assertEqual((result['status'], result['cert_id']), ('valid', '61105JDXSVKA6VXC'))
+
+    def test_reads_the_id_line_of_a_screenshot(self):
+        result = collab.process('Fandom A', 'x.png', 'x', screenshot(certificate(1, text='61101HZSLUIHCBOR')), 'admin')
+        self.assertEqual((result['status'], result['cert_id']), ('valid', '61101HZSLUIHCBOR'))
 
 
 if __name__ == '__main__':
