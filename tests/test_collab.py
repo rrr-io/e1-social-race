@@ -121,10 +121,28 @@ class Verification(Base):
 
     def test_unreadable_or_disagreeing_ocr_needs_a_human(self):
         self.assertEqual(self.send(certificate(1), 'a', ids=(None, None))['status'], 'manual')
-        both = self.send(certificate(1, extra=10), 'b', ids=('CCCCCCCCCCCCCCCC', 'CCCCCCCCCCCCCCCO'))
+        both = self.send(certificate(1, extra=10), 'b', ids=('CCCCCCCCCCCCCCCC', 'CCCCCCCCCCCCCCCK'))  # C and K are not look-alikes
         self.assertEqual((both['status'], both['cert_id']), ('manual', 'CCCCCCCCCCCCCCCC'))
         self.assertEqual(self.send(b'not an image', 'c')['status'], 'manual')
         self.assertEqual(collab.queue(0, 10)['total'], 3)
+
+    def test_unsure_id_is_accepted_when_nothing_similar_is_counted(self):
+        # look-alike disagreement (O/0): accepted, nothing similar counted
+        first = self.send(certificate(1), 'a', ids=('61105JDXSVKA6VX0', '61105JDXSVKA6VXO', '61105JDXSVKA6VX0'))
+        self.assertEqual((first['status'], first['cert_id']), ('valid', '61105JDXSVKA6VX0'))
+        # a single reading is accepted too
+        single = self.send(certificate(1, extra=2), 'b', ids=('7777777777777777', None))
+        self.assertEqual(single['status'], 'valid')
+        # the same certificate read the other way is held for a person, never counted twice
+        twin = self.send(certificate(1, extra=3), 'c', ids=('61105JDXSVKA6VXO', '61105JDXSVKA6VX0'))
+        self.assertEqual(twin['status'], 'manual')
+        self.assertIn('61105JDXSVKA6VX0', twin['reason'])
+        # a variant of an ID that is counted, read with another look-alike in a different place, is held as well
+        other = self.send(certificate(1, extra=4), 'd', ids=('B1105JDXSVKA6VX0', 'B1105JDXSVKA6VXO', 'B1105JDXSVKA6VXO'))
+        self.assertEqual(other['status'], 'valid')
+        held = self.send(certificate(1, extra=5), 'e', ids=('8110SJDXSVKA6VXO', '8110SJDXSVKA6VX0'))
+        self.assertEqual(held['status'], 'manual')
+        self.assertEqual(collab.summary()['submissions'][0]['valid'], 3)
 
     def test_one_character_difference_is_not_counted_automatically(self):
         self.assertEqual(self.send(certificate(1), 'a', ids=('61105JDXSVKA6VXC',) * 2)['status'], 'valid')
@@ -163,10 +181,11 @@ class Verification(Base):
         results = []
 
         def go(i):
-            results.append(self.send(certificate(1, extra=i + 1), f'p{i}', ids=('FFFFFFFFFFFFFFFF',) * 2, fandom=f'Fandom {i % 3}')['status'])
+            results.append(collab.process(f'Fandom {i % 3}', f'p{i}.png', f'p{i}', certificate(1, extra=i + 1), 'admin')['status'])
         threads = [threading.Thread(target=go, args=(i,)) for i in range(8)]
-        [t.start() for t in threads]
-        [t.join() for t in threads]
+        with patch.object(collab, 'ocr_ids', return_value=('FFFFFFFFFFFFFFFF',) * 2):  # patched once, outside the threads
+            [t.start() for t in threads]
+            [t.join() for t in threads]
         self.assertEqual(sorted(results).count('valid'), 1)
         self.assertEqual(sum(r['valid'] for r in collab.summary()['submissions']), 1)
 
@@ -409,6 +428,17 @@ class Reprocess(Base):
         with patch.object(collab, 'ocr_ids', return_value=(d, d)):                        # running it twice never counts anything twice
             again = collab.reprocess_review(apply=True)
         self.assertEqual((again['valid'], again['duplicate']), (1, 0))                    # the "stuck" one is now readable; "near" is not eligible any more
+
+
+class ReprocessUnsure(Base):
+    def test_unsure_readings_are_accepted_when_re_read(self):
+        for i in range(2):
+            self.send(certificate(1, extra=i + 1), f'p{i}', ids=(None, None))
+        reads = iter([('2222222222222222', '2222222222222222'.replace('2', 'Z', 1)), ('3333333333333333', None)])
+        with patch.object(collab, 'ocr_ids', side_effect=lambda im: next(reads)):
+            result = collab.reprocess_review(apply=True)
+        self.assertEqual((result['valid'], result['unchanged']), (2, 0))
+        self.assertEqual(collab.queue(0, 10)['total'], 0)
 
 
 class FlaggedReview(Base):

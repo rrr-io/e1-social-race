@@ -284,6 +284,35 @@ def consensus(readings):
     return None
 
 
+CONFUSABLE = ('0OQD', '1IL', '5S', '8B', '2Z', '6G', 'A4', 'UV')
+FOLD = {ch: group[0] for group in CONFUSABLE for ch in group}
+
+
+def unsure_guess(readings):
+    """The best guess when the OCR is not sure, or None when the readings differ in more than look-alike characters.
+
+    A single valid reading, or readings that differ only in characters the OCR mixes up (O/0, I/1, S/5, B/8...),
+    still point to one certificate. The most frequent reading (the first among equals) is the guess.
+    """
+    found = [r for r in readings if r]
+    if not found:
+        return None
+    top = max(found, key=found.count)
+    if all(FOLD.get(a, a) == FOLD.get(b, b) for r in set(found) for a, b in zip(r, top)):
+        return top
+    return None
+
+
+def lookalikes(cert_id, limit=5):
+    """The ID with each look-alike character swapped (at most `limit` positions, so at most 2**limit IDs)."""
+    spots = [i for i, ch in enumerate(cert_id) if ch in FOLD][:limit]
+    out = {cert_id}
+    for i in spots:
+        group = next(g for g in CONFUSABLE if cert_id[i] in g)
+        out |= {v[:i] + alt + v[i + 1:] for v in out for alt in group}
+    return out
+
+
 # ---------------------------------------------------------------- identifiers
 def mask_keys(cert_id):
     return [f'{i}:{cert_id[:i]}*{cert_id[i + 1:]}' for i in range(len(cert_id))]
@@ -305,6 +334,28 @@ def exact_cert(c, cert_id):
 
 def add_mask(c, cert_id):
     c.executemany('INSERT INTO collab_mask(k,cert_id) VALUES(?,?)', [(k, cert_id) for k in mask_keys(cert_id)])
+
+
+def decide_id(c, cert_id, sure):
+    """Outcome of an ID once it is read: (status, reason). `sure` is False when the OCR did not fully confirm it.
+
+    A sure ID is valid unless it is already counted or one character from a counted ID. An unsure ID is also
+    accepted when no look-alike variant of it (O for 0, I for 1...) is counted or one character from a counted
+    ID: the image already passed every other check, so the ID only has to be told apart from the others.
+    """
+    same = exact_cert(c, cert_id)
+    if same:
+        return 'duplicate', f"Already counted for {same['fandom']} on {same['day']}"
+    near = near_cert(c, cert_id)
+    if near:
+        return 'manual', f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread"
+    if sure:
+        return 'valid', ''
+    for variant in sorted(lookalikes(cert_id) - {cert_id}):
+        twin = exact_cert(c, variant) and {'cert_id': variant} or near_cert(c, variant)
+        if twin:
+            return 'manual', f"The OCR is not sure of the ID and it could be {twin['cert_id']}, which is already counted"
+    return 'valid', 'ID not fully confirmed by the OCR; no similar ID is counted'
 
 
 # ---------------------------------------------------------------- upload pipeline
@@ -387,9 +438,10 @@ def analyse(data, refs, partner=None):
     if best:
         return 'ok', '', best, last, None
     guess = max(found, key=found.count)  # the first reading among equals
-    if len(set(found)) > 1:
-        return 'manual', 'The OCR readings of the ID disagree', guess, last, thumb
-    return 'manual', 'The OCR could not confirm the ID', guess, last, thumb
+    likely = unsure_guess(found)
+    if likely:  # decided by process() against the IDs already counted
+        return 'unsure', 'The OCR could not confirm the ID' if len(set(found)) == 1 else 'The OCR readings of the ID disagree', likely, last, thumb
+    return 'manual', 'The OCR readings of the ID disagree', guess, last, thumb
 
 
 def ocr_ids(im):
@@ -437,20 +489,18 @@ def process(fandom, file_name, file_key, data, actor, day=None):
         if again:
             return again
         sub = submission(c, fandom, day)
-        if status == 'ok':
-            thumb = None
+        if status in ('ok', 'unsure'):
+            keep_thumb = thumb
             twin = c.execute('''SELECT s.fandom,s.day FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id
                 WHERE p.sha256=? AND p.status='valid' LIMIT 1''', (sha,)).fetchone()
-            same = exact_cert(c, cert_id)
-            near = None if same else near_cert(c, cert_id)
-            if twin or same:
-                holder = twin or same
-                status, reason = 'duplicate', f"Already counted for {holder['fandom']} on {holder['day']}"
-            elif near:
-                status, reason = 'manual', f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread"
-                thumb = jpeg(normalise(open_image(data))[0], 640, 65)
+            if twin:
+                status, reason = 'duplicate', f"Already counted for {twin['fandom']} on {twin['day']}"
             else:
-                status = 'valid'
+                status, reason = decide_id(c, cert_id, status == 'ok')
+            if status == 'manual':
+                thumb = keep_thumb or jpeg(normalise(open_image(data))[0], 640, 65)
+            else:
+                thumb = None
         cur = c.execute('''INSERT INTO collab_proofs(submission_id,file_key,file_name,sha256,cert_id,status,reason,similarity,thumb,created_at)
             VALUES(?,?,?,?,?,?,?,?,?,?)''', (sub['id'], file_key, file_name, sha, cert_id, status, reason, sim, thumb, time.time()))
         if status == 'valid':
@@ -655,28 +705,29 @@ def reprocess_review(apply=False, progress=None):
         with storage.connection() as c:
             row = c.execute("SELECT thumb FROM collab_proofs WHERE id=? AND status='manual'", (proof_id,)).fetchone()
         im = open_image(row['thumb']) if row else None
-        best = None
+        best, sure = None, False
         if im is not None:
             with SLOTS:  # shares the CPU budget with uploads
-                best = consensus(ocr_ids(im))
+                readings = ocr_ids(im)
+            best = consensus(readings)
+            sure = bool(best)
+            best = best or unsure_guess(readings)
         outcome = 'unchanged'
         if best:
             with storage.connection() as c:
                 c.execute('BEGIN IMMEDIATE')
                 if c.execute("SELECT 1 FROM collab_proofs WHERE id=? AND status='manual'", (proof_id,)).fetchone():
-                    same, near = exact_cert(c, best), None
-                    near = None if same else near_cert(c, best)
-                    if same:
+                    status, reason = decide_id(c, best, sure)
+                    if status == 'duplicate':
                         c.execute("UPDATE collab_proofs SET status='duplicate',cert_id=?,reason=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
-                                  (best, f"Already counted for {same['fandom']} on {same['day']}", time.time(), proof_id))
+                                  (best, reason, time.time(), proof_id))
                         outcome = 'duplicate'
-                    elif near:
-                        c.execute('UPDATE collab_proofs SET cert_id=?,reason=? WHERE id=?',
-                                  (best, f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread", proof_id))
+                    elif status == 'manual':
+                        c.execute('UPDATE collab_proofs SET cert_id=?,reason=? WHERE id=?', (best, reason, proof_id))
                         outcome = 'near'
                     else:
-                        c.execute("UPDATE collab_proofs SET status='valid',cert_id=?,reason='Re-read automatically',thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
-                                  (best, time.time(), proof_id))
+                        c.execute("UPDATE collab_proofs SET status='valid',cert_id=?,reason=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
+                                  (best, reason or 'Re-read automatically', time.time(), proof_id))
                         add_mask(c, best)
                         outcome = 'valid'
         done[outcome] += 1
