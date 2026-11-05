@@ -39,7 +39,7 @@ RATIO = 930 / 1410  # Mnet Plus certificate width / height
 # Layout of the certificate as fractions of the image (measured on a 930x1410 export).
 THUMB_SLOTS = [(81 / 930, 443 / 1410, 321 / 930, 683 / 1410), (345 / 930, 443 / 1410, 585 / 930, 683 / 1410),
                (609 / 930, 443 / 1410, 849 / 930, 683 / 1410)]
-ID_BOX = (0.125, 0.903, 0.585, 0.959)
+ID_BOX = (0.04, 0.903, 0.66, 0.959)   # the whole "No. <ID>" line, with some margin
 # Phone screenshots: the card is rendered a few pixels off the export layout, so the card found in the
 # screenshot is padded to the export frame and thumbnails are compared over a small window of offsets.
 SHOT_TOP, SHOT_BOTTOM = -0.0055, 0.001   # frame edges relative to the detected card height
@@ -226,35 +226,62 @@ def jpeg(im, width, quality):
 def tesseract(img):
     out = io.BytesIO()
     img.save(out, 'PNG')
-    run = subprocess.run([TESSERACT, 'stdin', 'stdout', '--psm', '7', '-l', 'eng', '-c', f'tessedit_char_whitelist={ALNUM}'],
+    # The dictionaries are switched off: the ID is a random string, and word models "correct" it.
+    run = subprocess.run([TESSERACT, 'stdin', 'stdout', '--psm', '7', '-l', 'eng', '-c', f'tessedit_char_whitelist={ALNUM}',
+                          '-c', 'load_system_dawg=0', '-c', 'load_freq_dawg=0'],
                          input=out.getvalue(), capture_output=True, timeout=30, env=dict(os.environ, OMP_THREAD_LIMIT='1'))
     return run.stdout.decode('utf-8', 'ignore')
 
 
 def parse_id(text):
     s = re.sub(r'[^A-Z0-9]', '', text.upper())
-    if len(s) == 18 and re.match(r'N[O0]', s):
+    if len(s) == 18 and s[:2] in ('NO', 'N0'):
         s = s[2:]
+    elif len(s) == 17 and s[0] == 'N':  # the lower-case "o" of "No." is outside the character whitelist
+        s = s[1:]
     return s if ID_RE.fullmatch(s) else None
 
 
 def read_ids(im):
-    """Independent OCR readings of the ID line (different scaling and preprocessing).
+    """Independent OCR readings of the "No. <ID>" line: different heights, plain and binarised.
 
-    Two readings are always taken; a third (binarised) one only when they do not already agree.
+    The wide box tolerates a few pixels of misalignment. Three readings are taken first; when they
+    all agree that is enough, otherwise up to five more are added, because the font is tightly spaced
+    and a single reading can add or merge a character (a "W" read as "WA").
     """
     strip = crop(im, ID_BOX).convert('L')
 
-    def variant(scale, binarise=False):
+    def variant(height, binarise=False):
+        scale = min(8.0, max(1.0, height / strip.height))
         img = ImageOps.autocontrast(strip.resize((round(strip.width * scale), round(strip.height * scale)), Image.LANCZOS))
         if binarise:
-            img = img.point(lambda p: 255 if p > 140 else 0)
+            img = img.point(lambda p: 255 if p > 150 else 0)
         return parse_id(tesseract(ImageOps.expand(img, 24, fill=255)))
 
-    readings = [variant(2), variant(3)]
-    if not (readings[0] and readings[0] == readings[1]):
-        readings.append(variant(3, binarise=True))
+    plan = [(110, False), (150, True), (200, False), (110, True), (200, True), (150, False), (260, True), (130, True)]
+    readings = []
+    for i, (height, binarise) in enumerate(plan):
+        readings.append(variant(height, binarise))
+        if i == 2 and readings[0] and len(set(readings)) == 1:
+            break
+        found = [r for r in readings if r]
+        if len(found) >= 4 and len(set(found)) == 1:
+            break
     return readings
+
+
+def consensus(readings):
+    """The ID the readings agree on, or None. The leader needs two votes, more than half of the valid
+    readings and a margin of two over the runner-up (unless every valid reading is identical)."""
+    found = [r for r in readings if r]
+    if len(found) < 2:
+        return None
+    top = max(set(found), key=found.count)
+    votes = found.count(top)
+    others = sorted((found.count(x) for x in set(found) if x != top), reverse=True)
+    if votes >= 2 and votes * 2 > len(found) and (not others or votes >= others[0] + 2 or votes == len(found)):
+        return top
+    return None
 
 
 # ---------------------------------------------------------------- identifiers
@@ -356,12 +383,13 @@ def analyse(data, refs, partner=None):
     found = [r for r in readings if r]
     if not found:
         return 'manual', 'Certificate ID not readable', None, last, thumb
-    best, votes = max(((r, found.count(r)) for r in found), key=lambda x: x[1])
-    if votes >= 2:  # at least two independent readings agree
+    best = consensus(found)
+    if best:
         return 'ok', '', best, last, None
+    guess = max(found, key=found.count)  # the first reading among equals
     if len(set(found)) > 1:
-        return 'manual', 'The OCR readings of the ID disagree', found[0], last, thumb
-    return 'manual', 'The OCR could not confirm the ID', found[0], last, thumb
+        return 'manual', 'The OCR readings of the ID disagree', guess, last, thumb
+    return 'manual', 'The OCR could not confirm the ID', guess, last, thumb
 
 
 def ocr_ids(im):
@@ -496,13 +524,27 @@ def summary():
     return {'submissions': rows, 'refs': refs, 'collabs': collabs, 'ocr_available': bool(TESSERACT), 'max_upload_mb': MAX_UPLOAD // 1048576}
 
 
-def queue(offset, limit):
+# What each review list holds. The two "flagged" lists are proofs the system rejected on its own: a person
+# can still accept one (a false rejection) or confirm it, which takes it out of the list.
+REVIEW_KINDS = {
+    'manual': "p.status='manual'",
+    'groups': "p.status='not_enhypen' AND p.reviewed_at IS NULL",
+    'partner': "p.status='not_partner' AND p.reviewed_at IS NULL",
+}
+OCR_REASONS = ('The OCR could not confirm the ID', 'The OCR readings of the ID disagree', 'Certificate ID not readable')
+OCR_WHERE = f"p.status='manual' AND p.thumb IS NOT NULL AND p.reason IN ({','.join(repr(r) for r in OCR_REASONS)})"
+
+
+def queue(offset, limit, kind='manual'):
+    if kind not in REVIEW_KINDS:
+        raise ValueError('Unknown review list')
     with storage.connection() as c:
-        total = c.execute("SELECT count(*) FROM collab_proofs WHERE status='manual'").fetchone()[0]
-        items = [dict(r) for r in c.execute('''SELECT p.id,s.fandom,s.day,p.file_name,p.reason,p.cert_id,p.similarity,p.thumb IS NOT NULL has_image
-            FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id WHERE p.status='manual'
+        counts = {k: c.execute(f'SELECT count(*) FROM collab_proofs p WHERE {w}').fetchone()[0] for k, w in REVIEW_KINDS.items()}
+        pending = c.execute(f'SELECT count(*) FROM collab_proofs p WHERE {OCR_WHERE}').fetchone()[0]
+        items = [dict(r) for r in c.execute(f'''SELECT p.id,s.fandom,s.day,p.file_name,p.status,p.reason,p.cert_id,p.similarity,p.thumb IS NOT NULL has_image
+            FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id WHERE {REVIEW_KINDS[kind]}
             ORDER BY p.id LIMIT ? OFFSET ?''', (limit, offset))]
-    return {'total': total, 'items': items}
+    return {'total': counts[kind], 'items': items, 'counts': counts, 'ocr_pending': pending}
 
 
 def known(keys):
@@ -544,10 +586,10 @@ def approve(proof_id, cert_id, confirm_similar, actor):
         raise ValueError('The certificate ID must be 16 letters or digits')
     with storage.connection() as c:
         c.execute('BEGIN IMMEDIATE')
-        row = c.execute('SELECT status FROM collab_proofs WHERE id=?', (proof_id,)).fetchone()
+        row = c.execute('SELECT status,reviewed_at FROM collab_proofs WHERE id=?', (proof_id,)).fetchone()
         if not row:
             raise ValueError('Proof not found')
-        if row['status'] != 'manual':
+        if row['status'] not in ('manual', 'not_enhypen', 'not_partner') or (row['status'] != 'manual' and row['reviewed_at']):
             raise ValueError('This proof was already reviewed')
         same = exact_cert(c, cert_id)
         if same:
@@ -561,6 +603,31 @@ def approve(proof_id, cert_id, confirm_similar, actor):
     return {'ok': True}
 
 
+def keep(proof_id, actor):
+    """Confirms that a proof the system rejected (other group, wrong partner image) really is not valid."""
+    with storage.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        done = c.execute("UPDATE collab_proofs SET reviewed_by=?,reviewed_at=? WHERE id=? AND status IN ('not_enhypen','not_partner') AND reviewed_at IS NULL",
+                         (actor, time.time(), proof_id)).rowcount
+    if not done:
+        raise ValueError('Proof not found or already reviewed')
+    return {'ok': True}
+
+
+def read_proof_id(proof_id):
+    """Reads the ID from the stored preview of a proof, to prefill the review form."""
+    with storage.connection() as c:
+        row = c.execute('SELECT thumb FROM collab_proofs WHERE id=?', (proof_id,)).fetchone()
+    im = open_image(bytes(row['thumb'])) if row and row['thumb'] else None
+    if im is None:
+        raise ValueError('There is no image to read for this proof')
+    with SLOTS:
+        readings = ocr_ids(im)
+    found = [r for r in readings if r]
+    best = consensus(readings)
+    return {'cert_id': best or (max(found, key=found.count) if found else None), 'confident': bool(best)}
+
+
 def reject(proof_id, actor):
     with storage.connection() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -571,6 +638,92 @@ def reject(proof_id, actor):
     return {'ok': True}
 
 
+def reprocess_review(apply=False, progress=None):
+    """Reads again the ID of proofs waiting in review because of the OCR, from their stored preview.
+
+    The preview is the certificate card at 640 px, enough for the current reader. A proof whose ID is now
+    confirmed is decided like a fresh upload: counted, duplicate, or kept for review when it is one character
+    away from a counted ID. Proofs the OCR still cannot confirm are left untouched. Returns the counts.
+    """
+    done = {'eligible': 0, 'valid': 0, 'duplicate': 0, 'near': 0, 'unchanged': 0}
+    with storage.connection() as c:
+        ids = [r['id'] for r in c.execute(f'SELECT p.id FROM collab_proofs p WHERE {OCR_WHERE} ORDER BY p.id')]
+    done['eligible'] = len(ids)
+    if not apply:
+        return done
+    for n, proof_id in enumerate(ids, 1):
+        with storage.connection() as c:
+            row = c.execute("SELECT thumb FROM collab_proofs WHERE id=? AND status='manual'", (proof_id,)).fetchone()
+        im = open_image(row['thumb']) if row else None
+        best = None
+        if im is not None:
+            with SLOTS:  # shares the CPU budget with uploads
+                best = consensus(ocr_ids(im))
+        outcome = 'unchanged'
+        if best:
+            with storage.connection() as c:
+                c.execute('BEGIN IMMEDIATE')
+                if c.execute("SELECT 1 FROM collab_proofs WHERE id=? AND status='manual'", (proof_id,)).fetchone():
+                    same, near = exact_cert(c, best), None
+                    near = None if same else near_cert(c, best)
+                    if same:
+                        c.execute("UPDATE collab_proofs SET status='duplicate',cert_id=?,reason=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
+                                  (best, f"Already counted for {same['fandom']} on {same['day']}", time.time(), proof_id))
+                        outcome = 'duplicate'
+                    elif near:
+                        c.execute('UPDATE collab_proofs SET cert_id=?,reason=? WHERE id=?',
+                                  (best, f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread", proof_id))
+                        outcome = 'near'
+                    else:
+                        c.execute("UPDATE collab_proofs SET status='valid',cert_id=?,reason='Re-read automatically',thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
+                                  (best, time.time(), proof_id))
+                        add_mask(c, best)
+                        outcome = 'valid'
+        done[outcome] += 1
+        if progress:
+            progress(n, len(ids))
+    return done
+
+
+JOB = {'running': False, 'done': 0, 'total': 0, 'result': None, 'error': None}
+JOB_LOCK = threading.Lock()
+
+
+def reprocess_status():
+    with JOB_LOCK:
+        return dict(JOB)
+
+
+def reprocess_start():
+    """Starts reading the OCR-related review proofs again in the background (one run at a time)."""
+    if not TESSERACT:
+        raise ValueError('The OCR engine (tesseract) is not installed on the server')
+    with JOB_LOCK:
+        if JOB['running']:
+            return dict(JOB)
+        JOB.update(running=True, done=0, total=0, result=None, error=None)
+
+    def progress(n, total):
+        with JOB_LOCK:
+            JOB.update(done=n, total=total)
+
+    def run():
+        try:
+            result = reprocess_review(apply=True, progress=progress)
+            with JOB_LOCK:
+                JOB.update(result=result)
+        except Exception as error:  # reported to the page; the proofs already decided stay decided
+            logging.exception('Reprocessing the review list failed')
+            with JOB_LOCK:
+                JOB.update(error=str(error) or 'Unexpected error')
+        finally:
+            with JOB_LOCK:
+                JOB.update(running=False)
+
+    threading.Thread(target=run, daemon=True, name='collab-reprocess').start()
+    return reprocess_status()
+
+
 # ---------------------------------------------------------------- HTTP glue (called from app.py)
 def get(path, query):
     """Returns (status, body, content_type) for authenticated GET requests, or None if not a collab route."""
@@ -578,7 +731,10 @@ def get(path, query):
         return 200, summary(), 'application/json; charset=utf-8'
     if path == '/api/collab/queue':
         offset = max(0, int((query.get('offset') or ['0'])[0]))
-        return 200, queue(offset, min(50, max(1, int((query.get('limit') or ['10'])[0])))), 'application/json; charset=utf-8'
+        kind = (query.get('kind') or ['manual'])[0]
+        return 200, queue(offset, min(50, max(1, int((query.get('limit') or ['10'])[0]))), kind), 'application/json; charset=utf-8'
+    if path == '/api/collab/reprocess':
+        return 200, reprocess_status(), 'application/json; charset=utf-8'
     if path == '/api/collab/export.csv':
         kind = 'full' if (query.get('kind') or [''])[0] == 'full' else 'summary'
         day = clean((query.get('day') or [''])[0], 10)
@@ -615,10 +771,16 @@ def mutate(path, payload, actor):
         if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys) or len(keys) > 2000:
             raise ValueError('keys must be a list of at most 2000 strings')
         return {'known': known(keys)}
-    match = re.fullmatch(r'/api/collab/proofs/(\d+)/(approve|reject)', path)
+    if path == '/api/collab/reprocess/start':
+        return reprocess_start()
+    match = re.fullmatch(r'/api/collab/proofs/(\d+)/(approve|reject|keep|read)', path)
     if match:
         if match[2] == 'approve':
             return approve(int(match[1]), payload.get('cert_id', ''), bool(payload.get('confirm_similar')), actor)
+        if match[2] == 'keep':
+            return keep(int(match[1]), actor)
+        if match[2] == 'read':
+            return read_proof_id(int(match[1]))
         return reject(int(match[1]), actor)
     if path == '/api/collab/collabs/create':
         return create_collab(payload.get('name', ''), payload.get('slots'))
@@ -635,7 +797,16 @@ def mutate(path, payload, actor):
 
 if __name__ == '__main__':
     import sys
-    if sys.argv[1:] == ['reset-proofs', '--yes']:
+    args = sys.argv[1:]
+    if args == ['reset-proofs', '--yes']:
         print(f'Deleted {reset_proofs()} uploaded proofs. Collabs and reference images were kept.')
+    elif args in (['reprocess-review'], ['reprocess-review', '--yes']):
+        result = reprocess_review(apply='--yes' in args, progress=lambda n, total: n % 50 == 0 and print(f'  {n}/{total}', flush=True))
+        if '--yes' in args:
+            print(f"Re-read {result['eligible']} proofs: {result['valid']} now valid, {result['duplicate']} duplicates, "
+                  f"{result['near']} one character from a counted ID (still in review), {result['unchanged']} still unconfirmed.")
+        else:
+            print(f"{result['eligible']} proofs are in review because of the OCR. Run with --yes to read them again.")
     else:
-        print('Usage: python collab.py reset-proofs --yes   (deletes every uploaded proof; keeps collabs and references)')
+        print('Usage: python collab.py reset-proofs --yes        (deletes every uploaded proof; keeps collabs and references)\n'
+              '       python collab.py reprocess-review [--yes]   (reads again the IDs of OCR-related review proofs; without --yes only counts them)')

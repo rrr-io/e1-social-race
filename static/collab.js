@@ -20,6 +20,8 @@ function el(tag, className, text) {
 }
 const chip = (cls, text) => el('span', `chip ${cls}`, text);
 const localToday = () => new Date().toLocaleDateString('en-CA');
+// busy(button, false) only restores the label: the button must be re-enabled here.
+function release(button) { busy(button, false); button.disabled = false; }
 function fail(error) { const e = asRequestError(error); toast('error', e.title, e.message); }
 
 // ---------------------------------------------------------------- tabs
@@ -70,7 +72,6 @@ async function loadSummary() {
   renderRefs(data.refs);
   renderCollabs(data.collabs);
   renderRecap();
-  $('#review-count').textContent = String(data.submissions.reduce((n, s) => n + s.manual, 0) || '');
 }
 
 function sumCounts(rows) {
@@ -108,11 +109,99 @@ function renderRecap() {
     body.append(tr);
   }
   labelCells($('#summary-table'));
+  renderCards(select.value);
 }
 $('#recap-day').addEventListener('change', renderRecap);
 const exportUrl = kind => `/api/collab/export.csv?kind=${kind}&day=${encodeURIComponent($('#recap-day').value)}`;
 $('#csv-summary').addEventListener('click', () => { location.href = exportUrl('summary'); });
 $('#csv-full').addEventListener('click', () => { location.href = exportUrl('full'); });
+
+// ---------------------------------------------------------------- share cards (one image per collab)
+const SANS = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const MAX_DAYS = 6;
+const logo = new Image(); logo.src = '/e1-logo.png';
+const logoReady = new Promise(resolve => { logo.onload = logo.onerror = resolve; });
+const niceDay = d => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'}).toUpperCase();
+
+// Per collab: the days with their valid proofs (just the selected day when a date is chosen) and the total.
+function cardData(day) {
+  const by = new Map();
+  for (const s of data.submissions.filter(x => !day || x.day === day)) {
+    const r = by.get(s.fandom) || {fandom: s.fandom, valid: 0, days: []};
+    r.valid += s.valid; r.days.push({day: s.day, valid: s.valid}); by.set(s.fandom, r);
+  }
+  for (const r of by.values()) r.days.sort((a, b) => a.day.localeCompare(b.day));
+  return [...by.values()].sort((a, b) => b.valid - a.valid || a.fandom.localeCompare(b.fandom));
+}
+
+function fitText(ctx, text, width, size, weight) {
+  let s = size; ctx.font = `${weight} ${s}px ${SANS}`;
+  while (ctx.measureText(text).width > width && s > size * 0.55) { s -= 1; ctx.font = `${weight} ${s}px ${SANS}`; }
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t).width > width) t = t.slice(0, -1);
+  return t === text ? t : `${t}…`;
+}
+const spaced = (ctx, px) => { if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`; };
+
+function drawCard(r, day) {
+  const W = 1080, PAD = 84, shown = r.days.slice(-MAX_DAYS), list = !day && r.days.length > 1;
+  const H = 1080 + (list ? shown.length * 52 + 40 : 0), scale = 2;
+  const canvas = document.createElement('canvas'); canvas.width = W * scale; canvas.height = H * scale;
+  const ctx = canvas.getContext('2d'); ctx.scale(scale, scale); ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#0a0a0c'; ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(W, 0, 0, W, 0, 900); glow.addColorStop(0, 'rgba(255,122,26,0.26)'); glow.addColorStop(1, 'rgba(255,122,26,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#ff7a1a'; ctx.fillRect(0, 0, W, 12);
+  if (logo.naturalWidth) ctx.drawImage(logo, PAD, 70, 130, 130 * logo.naturalHeight / logo.naturalWidth);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#a3a3ad'; ctx.font = `600 28px ${SANS}`;
+  ctx.fillText(day ? niceDay(day) : r.days.length > 1 ? `${niceDay(r.days[0].day)} – ${niceDay(r.days[r.days.length - 1].day)}` : niceDay(r.days[0].day), W - PAD, 150);
+  ctx.textAlign = 'left'; ctx.fillStyle = '#ff7a1a'; ctx.font = `700 26px ${SANS}`; spaced(ctx, 5);
+  ctx.fillText('MAMA 2026 · VOTING PROOFS', PAD, 330); spaced(ctx, 0);
+  ctx.fillStyle = '#f2f2f4'; ctx.fillText(fitText(ctx, r.fandom, W - 2 * PAD, 76, 800), PAD, 420);
+  ctx.fillStyle = '#a3a3ad'; ctx.font = `600 40px ${SANS}`; ctx.fillText('× ENHYPEN', PAD, 482);
+  ctx.font = `900 ${r.valid >= 100000 ? 190 : 230}px ${SANS}`; ctx.fillStyle = '#ff7a1a';
+  ctx.fillText(fmt(r.valid), PAD - 6, 700);
+  ctx.fillStyle = '#f2f2f4'; ctx.font = `700 40px ${SANS}`; ctx.fillText(`valid proof${r.valid === 1 ? '' : 's'}`, PAD, 806);
+  let y = 896;
+  if (list) {
+    ctx.strokeStyle = '#2a2a33'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(PAD, y - 22); ctx.lineTo(W - PAD, y - 22); ctx.stroke();
+    for (const d of shown) {
+      ctx.textAlign = 'left'; ctx.fillStyle = '#a3a3ad'; ctx.font = `500 28px ${SANS}`; ctx.fillText(niceDay(d.day), PAD, y + 20);
+      ctx.textAlign = 'right'; ctx.fillStyle = '#f2f2f4'; ctx.font = `700 30px ${SANS}`; ctx.fillText(fmt(d.valid), W - PAD, y + 20);
+      y += 52;
+    }
+    if (r.days.length > shown.length) { ctx.textAlign = 'left'; ctx.fillStyle = '#7a7a85'; ctx.font = `500 22px ${SANS}`; ctx.fillText(`+ ${r.days.length - shown.length} earlier days`, PAD, y + 14); }
+  }
+  ctx.textAlign = 'left'; ctx.fillStyle = '#7a7a85'; ctx.font = `500 24px ${SANS}`;
+  ctx.fillText('Unique Mnet Plus certificates, verified one by one.', PAD, H - 64);
+  return canvas;
+}
+
+function renderCards(day) {
+  const box = $('#cards'); box.replaceChildren();
+  const rows = cardData(day);
+  if (!rows.length) { box.append(el('p', 'muted', 'No proofs yet.')); return; }
+  for (const r of rows) {
+    const item = el('div', 'card-row'), info = el('div');
+    info.append(el('strong', null, r.fandom), el('span', null, `${fmt(r.valid)} valid proof${r.valid === 1 ? '' : 's'}`));
+    const button = el('button', 'btn-ghost', 'Download card'); button.type = 'button';
+    button.setAttribute('aria-label', `Download the share card for ${r.fandom}`);
+    button.addEventListener('click', async () => {
+      busy(button, true, 'Creating…');
+      try {
+        await logoReady;
+        const blob = await new Promise((resolve, reject) => drawCard(r, day).toBlob(b => b ? resolve(b) : reject(new Error('The browser could not create the image')), 'image/png'));
+        const link = el('a'); link.href = URL.createObjectURL(blob);
+        const slug = r.fandom.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collab';
+        link.download = `enhypen-proofs-${slug}-${day || `all-as-of-${localToday()}`}.png`;
+        document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+      } catch (e) { fail(e); }
+      finally { release(button); }
+    });
+    item.append(info, button); box.append(item);
+  }
+}
 
 // ---------------------------------------------------------------- references
 function refFigure(r) {
@@ -180,7 +269,7 @@ function renderCollabs(collabs) {
         busy(button, true, 'Adding…');
         try { await sendRef(file.files[0], `collab=${c.id}&slot=${slot.value}`); await loadSummary(); }
         catch (e) { toast('error', 'Reference not added', e.message); }
-        finally { busy(button, false); }
+        finally { release(button); }
       });
       add.append(picker, slotLabel, button); card.append(add);
     }
@@ -309,20 +398,71 @@ $('#upload-form').addEventListener('submit', async event => {
 });
 $('#stop').addEventListener('click', () => { stopping = true; $('#run-text').textContent = 'Stopping after the files in progress…'; });
 
-// ---------------------------------------------------------------- manual review
+// ---------------------------------------------------------------- review
+const KIND_NOTES = {
+  manual: 'Proofs the system could not verify with certainty: correct the ID if needed, then accept or reject. A one-character-different ID needs a second click to confirm it is a different certificate.',
+  groups: 'Proofs rejected because the last image is not ENHYPEN (another group, or ENHYPEN in another position). If the system got one wrong, read or type the ID and accept it; otherwise confirm it to clear it from this list. The status stays "not ENHYPEN" in the recap.',
+  partner: 'Proofs rejected because the collab\'s own image is missing or in the wrong position. If the system got one wrong, read or type the ID and accept it; otherwise confirm it to clear it from this list. The status stays "wrong partner image" in the recap.',
+};
+let kind = 'manual', pollTimer = null;
+
 async function loadQueue() {
-  const body = await request(`/api/collab/queue?offset=${offset}&limit=${PAGE}`);
+  const body = await request(`/api/collab/queue?kind=${kind}&offset=${offset}&limit=${PAGE}`);
   if (!body.items.length && offset > 0) { offset = Math.max(0, offset - PAGE); return loadQueue(); }
-  $('#review-count').textContent = body.total ? String(body.total) : '';
+  const all = body.counts.manual + body.counts.groups + body.counts.partner;
+  $('#review-count').textContent = all ? fmt(all) : '';
+  document.querySelectorAll('#review-kinds button').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.dataset.kind === kind));
+    b.querySelector('.seg-count').textContent = body.counts[b.dataset.kind] ? fmt(body.counts[b.dataset.kind]) : '';
+  });
+  $('#review-note').textContent = KIND_NOTES[kind];
+  renderOcrNotice(body.ocr_pending);
   $('#page-info').textContent = body.total ? `${offset + 1}–${offset + body.items.length} of ${fmt(body.total)}` : '';
   $('#prev').disabled = offset === 0; $('#next').disabled = offset + PAGE >= body.total;
   $('.pager').hidden = body.total <= PAGE;
   const box = $('#queue'); box.replaceChildren();
-  if (!body.items.length) box.append(el('p', 'muted', 'Nothing to review.'));
+  if (!body.items.length) box.append(el('p', 'muted', 'Nothing to review here.'));
   for (const item of body.items) box.append(proofCard(item));
+}
+document.querySelectorAll('#review-kinds button').forEach(b => b.addEventListener('click', () => {
+  if (kind === b.dataset.kind) return;
+  kind = b.dataset.kind; offset = 0; loadQueue().catch(fail);
+}));
+
+// Proofs waiting only because the OCR could not read the ID can be read again, in the background.
+function renderOcrNotice(pending, job) {
+  const box = $('#ocr-notice'), button = $('#reread');
+  box.hidden = kind !== 'manual' || (!pending && !(job && job.running));
+  if (box.hidden) return;
+  $('#ocr-notice-title').textContent = job && job.running
+    ? `Reading again… ${fmt(job.done)} of ${fmt(job.total)}`
+    : `${fmt(pending)} proof${pending === 1 ? ' is' : 's are'} waiting only because the OCR could not confirm the ID`;
+  let bar = box.querySelector('progress');
+  if (job && job.running) {
+    if (!bar) { bar = el('progress'); box.append(bar); }
+    bar.max = Math.max(1, job.total); bar.value = job.done;
+  } else if (bar) bar.remove();
+  button.disabled = Boolean(job && job.running);
+}
+$('#reread').addEventListener('click', async () => {
+  try { await request('/api/collab/reprocess/start', {}); } catch (e) { return fail(e); }
+  pollReprocess();
+});
+function pollReprocess() {
+  clearTimeout(pollTimer);
+  request('/api/collab/reprocess').then(async job => {
+    if (job.running) {
+      renderOcrNotice(0, job); pollTimer = setTimeout(pollReprocess, 1500); return;
+    }
+    await Promise.all([loadSummary(), loadQueue()]);
+    if (job.error) return toast('error', 'Reading again stopped', job.error);
+    const r = job.result;
+    if (r) toast('success', 'Read again', `${fmt(r.valid)} now valid, ${fmt(r.duplicate)} duplicates, ${fmt(r.near)} one character from a counted ID, ${fmt(r.unchanged)} still unconfirmed.`);
+  }).catch(fail);
 }
 
 function proofCard(item) {
+  const flagged = item.status !== 'manual';
   const card = el('article', 'proof');
   if (item.has_image) {
     const img = el('img'); img.src = `/api/collab/proofs/${item.id}/image`; img.alt = `Certificate ${item.file_name}`;
@@ -334,10 +474,25 @@ function proofCard(item) {
   input.value = item.cert_id || ''; input.maxLength = 16; input.autocomplete = 'off'; input.spellcheck = false;
   label.append(input);
   const msg = el('p', 'proof-msg'); msg.setAttribute('role', 'status');
-  const ok = el('button', null, 'Valid ENHYPEN proof'), no = el('button', 'btn-ghost', 'Reject');
+  const ok = el('button', null, 'Valid ENHYPEN proof'), no = el('button', 'btn-ghost', flagged ? 'Confirm: not valid' : 'Reject');
   ok.type = no.type = 'button';
+  const row = el('div', 'id-row'); row.append(label);
+  if (flagged) {  // these were rejected before the ID was read: read it on request
+    const read = el('button', 'btn-ghost', 'Read ID from image'); read.type = 'button';
+    read.addEventListener('click', async () => {
+      busy(read, true, 'Reading…'); msg.textContent = '';
+      try {
+        const r = await request(`/api/collab/proofs/${item.id}/read`, {});
+        if (r.cert_id) { input.value = r.cert_id; input.dispatchEvent(new Event('input')); }
+        msg.className = 'proof-msg warn';
+        msg.textContent = !r.cert_id ? 'The ID could not be read: type it from the image.' : r.confident ? 'ID read: check it against the image.' : 'The readings were not sure: check every character against the image.';
+      } catch (e) { msg.className = 'proof-msg'; msg.textContent = asRequestError(e).message; }
+      finally { release(read); }
+    });
+    row.append(read);
+  }
   let confirming = false;
-  input.addEventListener('input', () => { confirming = false; ok.textContent = 'Valid ENHYPEN proof'; msg.textContent = ''; });
+  input.addEventListener('input', () => { confirming = false; ok.textContent = 'Valid ENHYPEN proof'; });
   ok.addEventListener('click', async () => {
     busy(ok, true, 'Saving…');
     try {
@@ -345,16 +500,16 @@ function proofCard(item) {
       if (r.needs_confirmation) { confirming = true; msg.className = 'proof-msg warn'; msg.textContent = r.message; ok.textContent = 'Confirm: different certificate'; return; }
       await Promise.all([loadSummary(), loadQueue()]);
     } catch (e) { msg.className = 'proof-msg'; msg.textContent = asRequestError(e).message; }
-    finally { busy(ok, false); }
+    finally { release(ok); }
   });
   no.addEventListener('click', async () => {
     busy(no, true, 'Saving…');
-    try { await request(`/api/collab/proofs/${item.id}/reject`, {}); await Promise.all([loadSummary(), loadQueue()]); }
+    try { await request(`/api/collab/proofs/${item.id}/${flagged ? 'keep' : 'reject'}`, {}); await Promise.all([loadSummary(), loadQueue()]); }
     catch (e) { msg.className = 'proof-msg'; msg.textContent = asRequestError(e).message; }
-    finally { busy(no, false); }
+    finally { release(no); }
   });
   const actions = el('div', 'proof-actions'); actions.append(ok, no);
-  body.append(label, actions, msg); card.append(body);
+  body.append(row, actions, msg); card.append(body);
   return card;
 }
 $('#prev').addEventListener('click', () => { offset = Math.max(0, offset - PAGE); loadQueue().catch(fail); });
@@ -363,7 +518,7 @@ $('#next').addEventListener('click', () => { offset += PAGE; loadQueue().catch(f
 // ---------------------------------------------------------------- start
 $('#proofs-date').value = localToday(); $('#proofs-date').max = localToday();
 activate();
-Promise.all([loadSummary(), loadQueue()]).then(() => {
+Promise.all([loadSummary(), loadQueue()]).then(() => { request('/api/collab/reprocess').then(j => j.running && pollReprocess()).catch(() => {});
   if (!location.hash && data.refs.length && data.collabs.length) location.hash = 'upload';  // setup is done: go straight to uploading
 }).catch(fail);
 })();

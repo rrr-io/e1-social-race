@@ -270,6 +270,16 @@ class HTTP(Base):
                 'Authorization': 'Basic ' + base64.b64encode(f'{app.USERNAME}:{app.PASSWORD}'.encode()).decode()})) as r:
             self.assertIn('mama-valid-proofs-2026-11-01.csv', r.headers['Content-Disposition'])
 
+    def test_review_lists_over_http(self):
+        with patch.object(collab, 'ocr_ids', return_value=('AAAAAAAAAAAAAAAA',) * 2):
+            self.call('/api/collab/upload?fandom=Fandom%20A&name=x.png&key=k9', certificate(2, extra=6), raw=True)
+        status, body = self.call('/api/collab/queue?kind=groups')
+        self.assertEqual((status, json.loads(body)['total']), (200, 1))
+        self.assertEqual(self.call('/api/collab/queue?kind=nonsense')[0], 400)
+        proof = json.loads(body)['items'][0]['id']
+        self.assertEqual(self.call(f'/api/collab/proofs/{proof}/keep', {})[0], 200)
+        self.assertEqual(json.loads(self.call('/api/collab/reprocess')[1])['running'], False)
+
     def test_requires_authentication(self):
         for path in ('/collab-verify', '/api/collab/summary', '/api/collab/proofs/1/image'):
             self.assertEqual(self.call(path, auth=False)[0], 401)
@@ -358,6 +368,105 @@ class Screenshots(Base):
         self.assertFalse(collab.normalise(Image.open(io.BytesIO(certificate(1))).convert('RGB'))[1])  # real certificates pass through
 
 
+class IdReading(unittest.TestCase):
+    def test_parse_accepts_the_no_prefix_in_its_forms(self):
+        for text in ('61101EL66DVW4LYL', 'NO61101EL66DVW4LYL', 'N061101EL66DVW4LYL', 'N61101EL66DVW4LYL\n'):
+            self.assertEqual(collab.parse_id(text), '61101EL66DVW4LYL', text)
+        for text in ('61101EL66DVWA4LYL', 'N61101EL66DVWA4LYL', '61101EL66DVW4LY', ''):   # an inserted or missing character
+            self.assertIsNone(collab.parse_id(text), text)
+
+    def test_consensus_needs_agreement_and_a_margin(self):
+        a, b = '61101EL66DVW4LYL', '61101EL66DVWALYL'
+        self.assertEqual(collab.consensus([a, a]), a)
+        self.assertEqual(collab.consensus([a, None, a, None, a]), a)
+        self.assertEqual(collab.consensus([a, a, a, b]), a)          # clear majority
+        self.assertIsNone(collab.consensus([a, b]))                   # disagreement
+        self.assertIsNone(collab.consensus([a, a, b, b]))
+        self.assertIsNone(collab.consensus([a, a, b]))                # only a margin of one
+        self.assertIsNone(collab.consensus([a, None, None]))          # a single reading is never enough
+
+
+class Reprocess(Base):
+    def test_ocr_review_items_are_read_again(self):
+        a, b, c, d = 'AAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBB', 'AAAAAAAAAAAAAAAC', 'DDDDDDDDDDDDDDDD'
+        self.send(certificate(1, extra=1), 'counted', ids=(a, a))                     # already valid
+        self.assertEqual(self.send(certificate(1, extra=2), 'new', ids=(None, None))['status'], 'manual')
+        self.send(certificate(1, extra=3), 'dup', ids=(None, None))
+        self.send(certificate(1, extra=4), 'near', ids=(None, None))
+        self.send(certificate(1, extra=5), 'stuck', ids=(None, None))
+        self.assertEqual(collab.reprocess_review()['eligible'], 4)                      # without apply nothing changes
+        reads = iter([(b, b), (a, a), (c, c), (None, None)])
+        with patch.object(collab, 'ocr_ids', side_effect=lambda im: next(reads)):
+            result = collab.reprocess_review(apply=True)
+        self.assertEqual(result, {'eligible': 4, 'valid': 1, 'duplicate': 1, 'near': 1, 'unchanged': 1})
+        with storage.connection() as conn:
+            status = {r['file_name']: (r['status'], r['cert_id']) for r in conn.execute('SELECT file_name,status,cert_id FROM collab_proofs')}
+        self.assertEqual(status['new.png'], ('valid', b))
+        self.assertEqual(status['dup.png'][0], 'duplicate')
+        self.assertEqual(status['near.png'], ('manual', c))                              # one character from a counted ID: a human decides
+        self.assertEqual(status['stuck.png'][0], 'manual')
+        self.assertEqual(collab.queue(0, 20)['total'], 2)
+        with patch.object(collab, 'ocr_ids', return_value=(d, d)):                        # running it twice never counts anything twice
+            again = collab.reprocess_review(apply=True)
+        self.assertEqual((again['valid'], again['duplicate']), (1, 0))                    # the "stuck" one is now readable; "near" is not eligible any more
+
+
+class FlaggedReview(Base):
+    def setUp(self):
+        super().setUp()
+        self.partner = collab.create_collab('Lingshot', [0])['id']
+        collab.add_reference('Lingshot', certificate(1, first_seed=20), self.partner, 0)
+
+    def test_rejected_proofs_can_be_reviewed(self):
+        self.send(certificate(2, extra=1), 'other-group')                                      # last image is not ENHYPEN
+        self.send(certificate(1, first_seed=77, extra=2), 'wrong-partner', fandom='Lingshot')  # not Lingshot
+        self.send(certificate(1, extra=3), 'unreadable', ids=(None, None))
+        q = {k: collab.queue(0, 10, k) for k in ('manual', 'groups', 'partner')}
+        self.assertEqual(q['manual']['counts'], {'manual': 1, 'groups': 1, 'partner': 1})
+        self.assertEqual([i['file_name'] for i in q['groups']['items']], ['other-group.png'])
+        self.assertEqual([(i['file_name'], i['status']) for i in q['partner']['items']], [('wrong-partner.png', 'not_partner')])
+        with self.assertRaises(ValueError):
+            collab.queue(0, 10, 'nonsense')
+        # confirming one takes it out of its list and leaves its status alone
+        collab.keep(q['groups']['items'][0]['id'], 'admin')
+        self.assertEqual(collab.queue(0, 10, 'groups')['total'], 0)
+        with self.assertRaises(ValueError):
+            collab.keep(q['groups']['items'][0]['id'], 'admin')
+        # a false rejection can be accepted with the ID
+        proof = q['partner']['items'][0]['id']
+        self.assertEqual(collab.approve(proof, 'ZZZZZZZZZZZZZZZZ', False, 'admin'), {'ok': True})
+        rows = {r['fandom']: r for r in collab.summary()['submissions']}
+        self.assertEqual((rows['Lingshot']['valid'], rows['Lingshot']['not_partner']), (1, 0))
+        with self.assertRaises(ValueError):
+            collab.approve(proof, 'YYYYYYYYYYYYYYYY', False, 'admin')                           # already reviewed
+
+    def test_id_is_read_from_the_stored_preview(self):
+        self.send(certificate(2, extra=1), 'other-group')
+        proof = collab.queue(0, 10, 'groups')['items'][0]['id']
+        with patch.object(collab, 'ocr_ids', return_value=('QQQQQQQQQQQQQQQQ',) * 2):
+            self.assertEqual(collab.read_proof_id(proof), {'cert_id': 'QQQQQQQQQQQQQQQQ', 'confident': True})
+        with patch.object(collab, 'ocr_ids', return_value=('QQQQQQQQQQQQQQQQ', 'QQQQQQQQQQQQQQQR')):
+            self.assertEqual(collab.read_proof_id(proof), {'cert_id': 'QQQQQQQQQQQQQQQQ', 'confident': False})
+
+    def test_reprocessing_runs_in_the_background(self):
+        import time
+        self.send(certificate(1, extra=1), 'a', ids=(None, None))
+        self.send(certificate(1, extra=2), 'b', ids=(None, None))
+        self.assertEqual(collab.queue(0, 10)['ocr_pending'], 2)
+        reads = iter([('AAAAAAAAAAAAAAAA',) * 2, (None, None)])
+        with patch.object(collab, 'ocr_ids', side_effect=lambda im: next(reads)):
+            collab.reprocess_start()
+            for _ in range(100):
+                if not collab.reprocess_status()['running']:
+                    break
+                time.sleep(0.05)
+        state = collab.reprocess_status()
+        self.assertFalse(state['running'])
+        self.assertEqual((state['done'], state['total'], state['error']), (2, 2, None))
+        self.assertEqual((state['result']['valid'], state['result']['unchanged']), (1, 1))
+        self.assertEqual(collab.queue(0, 10)['ocr_pending'], 1)
+
+
 class Cleanup(Base):
     def test_reset_proofs_keeps_collabs_and_references(self):
         self.send(certificate(1, extra=3), 'a')
@@ -405,6 +514,17 @@ class RealOCR(Base):
     def test_reads_the_id_line(self):
         result = collab.process('Fandom A', 'x.png', 'x', certificate(1, text='61105JDXSVKA6VXC'), 'admin')
         self.assertEqual((result['status'], result['cert_id']), ('valid', '61105JDXSVKA6VXC'))
+
+    def test_reads_the_whole_no_line(self):
+        for width in (930, 640):
+            im = Image.open(io.BytesIO(certificate(1, text='No. 61105JDXSVKA6VXC')))
+            im = im.resize((width, round(width * 1410 / 930)), Image.LANCZOS)
+            out = io.BytesIO()
+            im.save(out, 'PNG')
+            data = out.getvalue()
+            result = collab.process('Fandom A', f'n{width}.png', f'n{width}', data, 'admin')
+            self.assertEqual((result['status'], result['cert_id']), ('valid', '61105JDXSVKA6VXC'), width)
+            collab.reset_proofs()
 
     def test_reads_the_id_line_of_a_screenshot(self):
         result = collab.process('Fandom A', 'x.png', 'x', screenshot(certificate(1, text='61101HZSLUIHCBOR')), 'admin')

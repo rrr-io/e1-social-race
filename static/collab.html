@@ -81,8 +81,14 @@
   </section>
 
   <section id="review-panel" role="tabpanel" aria-labelledby="review-tab" hidden>
-    <div class="head-row"><h2>Manual review</h2><span class="pager"><button id="prev" class="btn-ghost" type="button">← Previous</button><span id="page-info" class="muted"></span><button id="next" class="btn-ghost" type="button">Next →</button></span></div>
-    <p class="section-note">Proofs the system could not verify with certainty: correct the ID if needed, then accept or reject. A one-character-different ID needs a second click to confirm it is a different certificate.</p>
+    <div class="head-row"><h2>Review</h2><span class="pager"><button id="prev" class="btn-ghost" type="button">← Previous</button><span id="page-info" class="muted"></span><button id="next" class="btn-ghost" type="button">Next →</button></span></div>
+    <div id="review-kinds" class="seg" role="group" aria-label="Review list">
+      <button type="button" data-kind="manual" aria-pressed="true">To verify <span class="seg-count"></span></button>
+      <button type="button" data-kind="groups" aria-pressed="false">Other groups <span class="seg-count"></span></button>
+      <button type="button" data-kind="partner" aria-pressed="false">Wrong partner image <span class="seg-count"></span></button>
+    </div>
+    <p id="review-note" class="section-note"></p>
+    <div id="ocr-notice" class="banner" hidden><div><strong id="ocr-notice-title"></strong><p id="ocr-notice-text">The ID is read again from the stored image with the current reader. Proofs it confirms are counted (or marked as duplicates); the others stay here.</p></div><button id="reread" type="button">Read them again</button></div>
     <div id="queue"></div>
   </section>
 
@@ -94,6 +100,9 @@
         <button id="csv-full" class="btn-ghost" type="button">Download full report CSV</button>
       </span></div>
     <div id="tiles" class="tiles"></div>
+    <h3 class="sub">Share cards</h3>
+    <p class="section-note">One image per collab, to send to each fandom. It shows only that fandom's number of valid proofs and the date(s), nothing from the other collabs. It follows the proofs date selected above.</p>
+    <div id="cards" class="cards"></div>
     <div class="scroll"><table id="summary-table"><thead><tr><th>Fandom collab</th><th class="num">Valid proofs</th><th>Date</th><th class="num">Files</th><th class="num">Duplicates</th><th class="num">Not ENHYPEN</th><th class="num">Wrong partner image</th><th class="num">To review</th><th class="num">Rejected</th></tr></thead><tbody id="summary-body"></tbody></table></div>
     <p class="section-note">The downloads follow the selected proofs date, and the file name carries it.</p>
   </section>
