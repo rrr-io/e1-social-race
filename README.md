@@ -195,6 +195,7 @@ History has no automatic retention limit. Deleting a post also deletes all its s
 - `app.py`: authenticated HTTP endpoints and worker.
 - `collectors.py`: URL validation, YouTube API, yt-dlp and optional TikTok/Instagram cookies.
 - `storage.py`: SQLite, snapshots, scheduling and legacy error translation.
+- `collab.py`: collab verifier for MAMA voting certificates (`/collab-verify`); see [COLLAB.md](COLLAB.md).
 - `deploy/`: production Docker configuration, health check and server setup instructions.
 - `.github/workflows/deploy.yml`: tests and SSH deployment on pushes to `main`.
 - `static/`: dashboard with no external JavaScript dependencies.
@@ -218,3 +219,7 @@ The interface, application messages, comments and documentation are in English. 
 ## Social Grid Race
 
 The competition extension adds `/` (public standings) and `/admin` (authenticated administration with Setup, Track posts and Register posts tabs). See [RACE.md](RACE.md) for setup, scoring, the KST schedule, manual evidence, finalization and deployment limitations. Facebook is excluded from this MVP.
+
+## Collab verifier
+
+`/collab-verify` (admin login) verifies the MAMA voting certificates sent by partner fandoms: ENHYPEN as the last image, unique certificate ID, manual review for anything uncertain. It needs the `tesseract` OCR engine, which the Docker images install. See [COLLAB.md](COLLAB.md).

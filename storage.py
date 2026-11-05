@@ -44,6 +44,8 @@ def init():
         import race
         race.init(c)
         race.reschedule(c)
+        import collab
+        collab.init(c)
         c.execute("UPDATE posts SET status='queued' WHERE status='collecting'")
 
 

@@ -91,3 +91,5 @@
 
 .registration-card .unregister{margin-top:12px;width:100%}
 .registration-card .field-hint{margin:4px 0 0}
+
+.top-links{display:flex;gap:20px;flex-wrap:wrap}

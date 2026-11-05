@@ -11,9 +11,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import storage
+import collab
 import race
 from collectors import CollectionError, Target, collect, normalize_url
 
@@ -76,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        redirects = {'/race': '/', '/race/': '/', '/race-admin': '/admin#race', '/race-admin/': '/admin#race', '/admin/': '/admin'}
+        redirects = {'/race': '/', '/race/': '/', '/race-admin': '/admin#race', '/race-admin/': '/admin#race', '/admin/': '/admin', '/collab-verify/': '/collab-verify'}
         if path in redirects:
             return self.reply(302, '', extra={'Location': redirects[path]})
         if path == '/api/race':
@@ -94,10 +95,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/race/admin':
             return self.reply(200, race.read(admin=True))
         admin_files = {'/admin': ('index.html', 'text/html'), '/app.js': ('app.js', 'application/javascript'), '/style.css': ('style.css', 'text/css'),
-                       '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css'), '/share.js': ('share.js', 'application/javascript')}
+                       '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css'), '/share.js': ('share.js', 'application/javascript'),
+                       '/collab-verify': ('collab.html', 'text/html'), '/collab.js': ('collab.js', 'application/javascript'), '/collab.css': ('collab.css', 'text/css')}
         if path in admin_files:
             filename, mime = admin_files[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
+        if path.startswith('/api/collab/'):
+            try:
+                result = collab.get(path, parse_qs(urlsplit(self.path).query))
+            except (ValueError, TypeError) as exc:
+                return self.reply(400, {'error': str(exc)})
+            if result:
+                return self.reply(*result)
         if path == '/api/posts':
             return self.reply(200, {'posts': storage.rows(), 'interval_minutes': storage.INTERVAL // 60})
         match = re.fullmatch(r'/api/posts/(\d+)/(history|export)', path)
@@ -116,21 +125,40 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, output.getvalue(), 'text/csv; charset=utf-8', {'Content-Disposition': f'attachment; filename="post-{match[1]}.csv"'})
         self.reply(404, {'error': 'Resource not found'})
 
+    def collab_upload(self):
+        # Raw image bytes (not JSON); the collab module validates and analyses them.
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= collab.MAX_UPLOAD:
+                raise ValueError(f'The image is empty or larger than {collab.MAX_UPLOAD // 1048576} MB')
+            data = self.rfile.read(size)
+            query = parse_qs(urlsplit(self.path).query)
+            return self.reply(200, collab.post_raw(urlsplit(self.path).path, query, data, USERNAME))
+        except (ValueError, TypeError) as exc:
+            self.reply(400, {'error': str(exc)})
+        except Exception:
+            logging.exception('Collab upload failure')
+            self.reply(500, {'error': 'Internal server error'})
+
     def do_POST(self):
         if not self.authenticated():
             return
         if self.headers.get('Origin') not in (None, PUBLIC_ORIGIN):
             return self.reply(403, {'error': 'Origin not allowed. Check PUBLIC_ORIGIN.'})
+        if urlsplit(self.path).path in collab.RAW_POSTS:
+            return self.collab_upload()
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.reply(415, {'error': 'Use application/json'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 < size <= 8192:
+            path = urlsplit(self.path).path
+            if not 0 < size <= (262144 if path.startswith('/api/collab/') else 8192):
                 raise ValueError('Request is too large or empty')
             payload = json.loads(self.rfile.read(size))
             if not isinstance(payload, dict):
                 raise ValueError('Invalid JSON')
-            path = urlsplit(self.path).path
+            if path.startswith('/api/collab/'):
+                return self.reply(200, collab.mutate(path, payload, USERNAME))
             if path.startswith('/api/race/'):
                 return self.reply(200, race.mutate(path.rsplit('/', 1)[1], payload, USERNAME, MAX_POSTS))
             if path == '/api/posts':

@@ -1,2 +1,5 @@
-# Update this package when platform extractors change; no other runtime dependency.
+# Update this package when platform extractors change.
 yt-dlp[default,curl-cffi]>=2026.8.19
+# Collab verifier: image analysis and time zone data (OCR uses the tesseract binary installed in the image).
+Pillow>=10
+tzdata

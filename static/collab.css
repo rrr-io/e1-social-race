@@ -1,0 +1,49 @@
+/* Collab verifier page. Builds on common.css and style.css. */
+.top-links{display:flex;gap:20px;flex-wrap:wrap}
+.intro{color:var(--muted);font-size:14px;line-height:1.6;max-width:78ch;margin:0 0 28px}
+.block{margin-bottom:36px}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.row .grow{flex:1 1 260px}
+.field-hint{font-weight:400;color:var(--subtle);font-size:12px}
+.optional{font-weight:400;color:var(--subtle)}
+code{font-family:var(--mono);font-size:12px}
+.refs{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.refs figure{margin:0;position:relative}
+.refs img{display:block;width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line-strong)}
+.refs figcaption{max-width:96px;margin-top:4px;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.refs button{position:absolute;top:-8px;right:-8px;width:26px;min-height:0;height:26px;padding:0;border-radius:50%;font-size:14px}
+.form-actions{display:flex;gap:10px;flex-wrap:wrap}
+.bar{height:10px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:20px 0 10px}
+.bar span{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+.run-text{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+.run-errors{margin:0;padding-left:18px;font-size:12px;color:var(--err);max-height:120px;overflow:auto}
+.head-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.head-row h2{margin:0}
+.head-actions,.pager{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--muted);font-size:13px}
+th.num,td.num{text-align:right}
+td.num strong{font-size:15px}
+tr.total td{font-weight:700;border-top:2px solid var(--line-strong)}
+.proof{display:flex;gap:18px;flex-wrap:wrap;padding:18px;margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.proof img{width:150px;align-self:flex-start;border-radius:10px;border:1px solid var(--line-strong);cursor:zoom-in;background:var(--surface-2)}
+.proof img.zoom{width:min(100%,460px);cursor:zoom-out}
+.proof .none{width:150px;height:100px;display:grid;place-items:center;border-radius:10px;border:1px dashed var(--line-strong);color:var(--subtle);font-size:12px}
+.proof-body{flex:1 1 260px;min-width:0}
+.proof-body h3{margin:0 0 4px;overflow-wrap:anywhere}
+.proof-body .reason{margin:0 0 12px;font-size:13px;color:var(--warn)}
+.proof-body input{max-width:300px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
+.proof-actions{display:flex;gap:10px;flex-wrap:wrap}
+.proof-msg{min-height:18px;margin:10px 0 0;font-size:13px;color:var(--err)}
+.proof-msg.warn{color:var(--warn)}
+@media(max-width:720px){.proof img,.proof .none{width:100%}.proof img.zoom{width:100%}}
+
+.collabs{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:18px}
+.collab-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;min-width:0}
+.collab-card h3{margin:0 0 2px;overflow-wrap:anywhere}
+.collab-card .rule{margin:0 0 12px;font-size:13px;color:var(--muted)}
+.collab-card .refs{margin-bottom:12px}
+.collab-card .add-ref{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.collab-card .add-ref label{margin:0;flex:1 1 150px}
+.collab-card .remove{margin-top:12px}
+#collab-form{margin-bottom:0}
