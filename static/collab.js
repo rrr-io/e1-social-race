@@ -431,7 +431,7 @@ document.querySelectorAll('#review-kinds button').forEach(b => b.addEventListene
 
 // Proofs the checker may judge differently now can be checked again, in the background: every list has its own button.
 const RETRY_TEXT = {
-  manual: n => `${fmt(n)} proof${n === 1 ? ' is' : 's are'} here because the ID could not be read or an image was unclear`,
+  manual: n => `${fmt(n)} proof${n === 1 ? ' is' : 's are'} here because the ID could not be read, an image was unclear or the layout was not recognised`,
   groups: n => `${fmt(n)} proof${n === 1 ? ' was' : 's were'} rejected as another group: the ENHYPEN image may be recognised now`,
   partner: n => `${fmt(n)} proof${n === 1 ? ' was' : 's were'} rejected for the partner image: it may be recognised now`,
 };

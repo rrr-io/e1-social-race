@@ -460,6 +460,24 @@ class Realigned(Base):
         self.assertEqual(collab.queue(0, 10, 'groups')['total'], 0)
         self.assertEqual(collab.summary()['submissions'][0]['valid'], 1)
 
+    def test_taller_cards_are_read_and_old_layout_rejections_can_be_retried(self):
+        # a card 13% taller than the export, thumbnails wider: the layout check does not trust it, the search still finds ENHYPEN
+        def tall(extra):
+            base = Image.open(io.BytesIO(stretched(certificate(1), 1.1, (6, 0)))).convert('RGB')
+            ImageDraw.Draw(base).rectangle([5, 5, 5 + extra, 25], fill=(0, 0, 0))   # makes the files differ
+            im = base.resize((base.width, round(base.height * 1.13)), Image.LANCZOS)
+            buf = io.BytesIO(); im.save(buf, 'PNG')
+            return im, buf.getvalue()
+        im, data = tall(5)
+        self.assertFalse(collab.layout_ok(im))
+        self.assertEqual(self.send(data, 'tall', ids=('3030303030303030',) * 2)['status'], 'valid')
+        with patch.object(collab, 'align', return_value=-1.0):
+            old = self.send(tall(6)[1], 'tall2', ids=('3131313131313131',) * 2)
+        self.assertEqual((old['status'], old['reason'][:12]), ('manual', 'Non-standard'))
+        self.assertEqual(collab.queue(0, 10, 'manual')['retry_pending'], 1)
+        with patch.object(collab, 'ocr_ids', return_value=('3131313131313131',) * 2):
+            self.assertEqual(collab.reprocess_review(apply=True, kind='manual')['valid'], 1)
+
     def test_images_now_right_but_id_unreadable_moves_to_verify(self):
         wide = stretched(certificate(1, extra=4), 1.08, (10, 0))
         with patch.object(collab, 'align', return_value=-1.0):

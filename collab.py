@@ -685,7 +685,7 @@ REVIEW_KINDS = {
 OCR_REASONS = ('The OCR could not confirm the ID', 'The OCR readings of the ID disagree', 'Certificate ID not readable')
 # What a new check can change in each review list: the ID could not be read, or an image was not recognised.
 RETRY_KINDS = {
-    'manual': f"p.status='manual' AND (p.reason IN ({','.join(repr(r) for r in OCR_REASONS)}) OR p.reason LIKE '%image is unclear%')",
+    'manual': f"p.status='manual' AND (p.reason IN ({','.join(repr(r) for r in OCR_REASONS)}) OR p.reason LIKE '%image is unclear%' OR p.reason LIKE 'Non-standard layout%')",
     'groups': REVIEW_KINDS['groups'],
     'partner': REVIEW_KINDS['partner'],
 }
