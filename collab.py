@@ -89,6 +89,10 @@ def init(c):
         upgrade_legacy(c)
     c.executescript(SCHEMA)
     c.execute("INSERT OR REPLACE INTO collab_meta(k,v) VALUES('schema',?)", (str(SCHEMA_VERSION),))
+    if not c.execute("SELECT 1 FROM collab_meta WHERE k='fold_index'").fetchone():  # one-time: look-alike keys for the IDs already counted
+        for row in c.execute("SELECT cert_id FROM collab_proofs WHERE status='valid' AND cert_id IS NOT NULL").fetchall():
+            c.execute('INSERT INTO collab_mask(k,cert_id) VALUES(?,?)', (fold_key(row[0]), row[0]))
+        c.execute("INSERT INTO collab_meta(k,v) VALUES('fold_index','1')")
 
 
 def upgrade_legacy(c):
@@ -153,6 +157,51 @@ def slot_vector(im, slot, dx=0.0, dy=0.0):
     return [round(v / norm, 5) for v in values]
 
 
+def scaled_vector(im, slot, sx, sy, dx, dy):
+    """Like slot_vector, for a thumbnail that is `sx` times as wide and `sy` times as tall as the standard slot and moved by (dx, dy)."""
+    box = THUMB_SLOTS[slot]
+    cx, cy = (box[0] + box[2]) / 2 + dx, (box[1] + box[3]) / 2 + dy
+    hw, hh = (box[2] - box[0]) * sx * 0.4, (box[3] - box[1]) * sy * 0.4  # the 10% trim of slot_vector, on each side
+    small = crop(im, (cx - hw, cy - hh, cx + hw, cy + hh)).resize((24, 24), Image.LANCZOS)
+    values = list(small.tobytes())
+    mean = sum(values) / len(values)
+    values = [v - mean for v in values]
+    norm = sum(v * v for v in values) ** 0.5 or 1.0
+    return [v / norm for v in values]
+
+
+def align(im, slot, target, stop=0.97):
+    """Best similarity of a thumbnail with `target` when its position and size differ from the standard layout.
+
+    Some devices and app versions draw the thumbnails a little wider or lower; the same photo then scores
+    0.4-0.8 in the standard slot and above 0.99 once the window is aligned. A coarse search over size and
+    position is refined by a few rounds of small moves. Returns the best similarity found.
+    """
+    def score(p):
+        return correlation(scaled_vector(im, slot, *p), target)
+
+    seeds = sorted(((score((sx, 1.0, dx, dy)), (sx, 1.0, dx, dy)) for sx in (0.9, 0.96, 1.02, 1.08, 1.14)
+                    for dx in (-0.03, -0.015, 0.0, 0.015, 0.03) for dy in (-0.02, 0.0, 0.02)), reverse=True)
+    best = -1.0
+    for value, point in seeds[:2]:
+        step = [0.03, 0.03, 0.01, 0.01]
+        while step[2] > 0.0015 and value < stop:
+            moved = False
+            for i in range(4):
+                for sign in (-1, 1):
+                    candidate = list(point)
+                    candidate[i] += sign * step[i]
+                    got = score(candidate)
+                    if got > value:
+                        value, point, moved = got, tuple(candidate), True
+            if not moved:
+                step = [v / 2 for v in step]
+        best = max(best, value)
+        if best >= stop:
+            break
+    return best
+
+
 def correlation(a, b):
     return sum(x * y for x, y in zip(a, b))
 
@@ -212,7 +261,7 @@ def normalise(im):
 
 
 def layout_ok(im):
-    return abs(im.width / im.height / RATIO - 1) < 0.05
+    return abs(im.width / im.height / RATIO - 1) < 0.08
 
 
 def jpeg(im, width, quality):
@@ -314,7 +363,7 @@ def consensus(readings):
     return None
 
 
-CONFUSABLE = ('0OQD9', '1IL', '5S9', '8B', '2Z', '6G', 'A4', 'UV')  # groups overlap on purpose: 9 looks like 0 and like S
+CONFUSABLE = ('0OQD9', '1IL', '5S9', '8BS', '2Z', '6G', 'A4', 'UV')  # groups overlap on purpose: 9 looks like 0 and like S
 
 
 def _classes():
@@ -371,16 +420,30 @@ def exact_cert(c, cert_id):
         WHERE p.cert_id=? AND p.status='valid' ''', (cert_id,)).fetchone()
 
 
+def fold_key(cert_id):
+    return 'F:' + fold(cert_id)
+
+
 def add_mask(c, cert_id):
-    c.executemany('INSERT INTO collab_mask(k,cert_id) VALUES(?,?)', [(k, cert_id) for k in mask_keys(cert_id)])
+    # one more key per ID: the ID with every look-alike character (O/0, 1/I, 5/S...) folded, to find look-alike twins
+    c.executemany('INSERT INTO collab_mask(k,cert_id) VALUES(?,?)', [(k, cert_id) for k in mask_keys(cert_id) + [fold_key(cert_id)]])
+
+
+def look_alike(c, cert_id):
+    """A counted ID that is the same as this one except for look-alike characters, with its proof, or None."""
+    return c.execute('''SELECT m.cert_id, s.fandom, s.day FROM collab_mask m
+        JOIN collab_proofs p ON p.cert_id=m.cert_id AND p.status='valid'
+        JOIN collab_submissions s ON s.id=p.submission_id
+        WHERE m.k=? AND m.cert_id!=? LIMIT 1''', (fold_key(cert_id), cert_id)).fetchone()
 
 
 def decide_id(c, cert_id, sure):
     """Outcome of an ID once it is read: (status, reason). `sure` is False when the OCR did not fully confirm it.
 
-    A sure ID is valid unless it is already counted or one character from a counted ID. An unsure ID is also
-    accepted when no counted ID is a look-alike of it (O for 0, 9 for S, I for 1...): the image already passed
-    every other check, so the ID only has to be told apart from the others.
+    An ID is valid unless it is already counted, one character from a counted ID, or the same as a counted ID
+    apart from look-alike characters (O for 0, 9 for S, I for 1...). An ID the OCR did not fully confirm is
+    accepted too when none of that holds: the image already passed every other check, so the ID only has to be
+    told apart from the others.
     """
     same = exact_cert(c, cert_id)
     if same:
@@ -388,13 +451,10 @@ def decide_id(c, cert_id, sure):
     near = near_cert(c, cert_id)
     if near:
         return 'manual', f"ID differs by one character from {near['cert_id']} ({near['fandom']}, {near['day']}): possible duplicate or misread"
-    if sure:
-        return 'valid', ''
-    c.create_function('fold', 1, fold)  # a scan of the counted IDs, only for the proofs the OCR is unsure about
-    twin = c.execute("SELECT cert_id FROM collab_proofs WHERE status='valid' AND fold(cert_id)=? LIMIT 1", (fold(cert_id),)).fetchone()
-    if twin:
-        return 'manual', f"The OCR is not sure of the ID and it could be {twin['cert_id']}, which is already counted"
-    return 'valid', 'ID not fully confirmed by the OCR; no similar ID is counted'
+    twin = look_alike(c, cert_id)
+    if twin:  # the OCR confuses O/0, 1/I, 5/S...: the same certificate can be read two ways, even when the reading looks sure
+        return 'manual', f"Looks like {twin['cert_id']} ({twin['fandom']}, {twin['day']}) apart from look-alike characters: possible duplicate"
+    return ('valid', '') if sure else ('valid', 'ID not fully confirmed by the OCR; no similar ID is counted')
 
 
 # ---------------------------------------------------------------- upload pipeline
@@ -446,11 +506,14 @@ def analyse(data, refs, partner=None):
     shifts = SHOT_SHIFTS if screenshot else NO_SHIFT
 
     def match(slot, targets):
-        """Best similarity of one thumbnail with any target; screenshots are tried at a few small offsets."""
+        """Best similarity of one thumbnail with any target; screenshots are tried at a few small offsets.
+        When nothing matches at the standard position the thumbnail is searched for (position and size)."""
         best = -1.0
         for dx, dy in shifts:
             v = slot_vector(im, slot, dx, dy)
             best = max(best, max(correlation(v, t) for t in targets))
+        if best < T_OK:
+            best = max(best, *(align(im, slot, t) for t in targets[:4]))
         return best
 
     last = match(2, refs)
@@ -620,7 +683,12 @@ REVIEW_KINDS = {
     'partner': "p.status='not_partner' AND p.reviewed_at IS NULL",
 }
 OCR_REASONS = ('The OCR could not confirm the ID', 'The OCR readings of the ID disagree', 'Certificate ID not readable')
-OCR_WHERE = f"p.status='manual' AND p.thumb IS NOT NULL AND p.reason IN ({','.join(repr(r) for r in OCR_REASONS)})"
+# What a new check can change in each review list: the ID could not be read, or an image was not recognised.
+RETRY_KINDS = {
+    'manual': f"p.status='manual' AND (p.reason IN ({','.join(repr(r) for r in OCR_REASONS)}) OR p.reason LIKE '%image is unclear%')",
+    'groups': REVIEW_KINDS['groups'],
+    'partner': REVIEW_KINDS['partner'],
+}
 
 
 def queue(offset, limit, kind='manual'):
@@ -628,11 +696,11 @@ def queue(offset, limit, kind='manual'):
         raise ValueError('Unknown review list')
     with storage.connection() as c:
         counts = {k: c.execute(f'SELECT count(*) FROM collab_proofs p WHERE {w}').fetchone()[0] for k, w in REVIEW_KINDS.items()}
-        pending = c.execute(f'SELECT count(*) FROM collab_proofs p WHERE {OCR_WHERE}').fetchone()[0]
+        pending = c.execute(f'SELECT count(*) FROM collab_proofs p WHERE {retry_where(kind)}').fetchone()[0]
         items = [dict(r) for r in c.execute(f'''SELECT p.id,s.fandom,s.day,p.file_name,p.status,p.reason,p.cert_id,p.similarity,p.thumb IS NOT NULL has_image
             FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id WHERE {REVIEW_KINDS[kind]}
             ORDER BY p.id LIMIT ? OFFSET ?''', (limit, offset))]
-    return {'total': counts[kind], 'items': items, 'counts': counts, 'ocr_pending': pending}
+    return {'total': counts[kind], 'items': items, 'counts': counts, 'retry_pending': pending}
 
 
 def known(keys):
@@ -726,48 +794,69 @@ def reject(proof_id, actor):
     return {'ok': True}
 
 
-def reprocess_review(apply=False, progress=None):
-    """Reads again the ID of proofs waiting in review because of the OCR, from their stored preview.
+def retry_where(kind):
+    """The review proofs a new check can change, from their stored preview. 'all' is every list at once."""
+    if kind != 'all' and kind not in RETRY_KINDS:
+        raise ValueError('Unknown review list')
+    wanted = RETRY_KINDS.values() if kind == 'all' else [RETRY_KINDS[kind]]
+    return '(' + ' OR '.join(f'({w})' for w in wanted) + ') AND p.thumb IS NOT NULL'
 
-    The preview is the certificate card at 640 px, enough for the current reader. A proof whose ID is now
-    confirmed is decided like a fresh upload: counted, duplicate, or kept for review when it is one character
-    away from a counted ID. Proofs the OCR still cannot confirm are left untouched. Returns the counts.
+
+def reprocess_review(apply=False, progress=None, kind='all'):
+    """Checks again the proofs waiting in review, from their stored preview, with the current checker.
+
+    The preview is the certificate card at 640 px, enough for the current checker. A proof is checked like a
+    fresh upload (ENHYPEN image, partner image, ID): when it now passes it is counted, marked duplicate, or kept for
+    review when the ID is one character (or only look-alike characters) from a counted ID. A proof the system had
+    rejected as another group or wrong partner image whose images now match but whose ID needs a person moves to
+    the verify list. Proofs that still fail are left untouched. Returns the counts.
     """
-    done = {'eligible': 0, 'valid': 0, 'duplicate': 0, 'near': 0, 'unchanged': 0}
+    done = {'eligible': 0, 'valid': 0, 'duplicate': 0, 'near': 0, 'review': 0, 'unchanged': 0}
     with storage.connection() as c:
-        ids = [r['id'] for r in c.execute(f'SELECT p.id FROM collab_proofs p WHERE {OCR_WHERE} ORDER BY p.id')]
+        ids = [r['id'] for r in c.execute(f'SELECT p.id FROM collab_proofs p WHERE {retry_where(kind)} ORDER BY p.id')]
     done['eligible'] = len(ids)
     if not apply:
         return done
+    with storage.connection() as c:
+        refs = [json.loads(r['vec']) for r in c.execute('SELECT vec FROM collab_refs WHERE collab_id IS NULL')]
+    partners = {}
     for n, proof_id in enumerate(ids, 1):
-        with storage.connection() as c:
-            row = c.execute("SELECT thumb FROM collab_proofs WHERE id=? AND status='manual'", (proof_id,)).fetchone()
-        im = open_image(row['thumb']) if row else None
-        best, sure = None, False
-        if im is not None:
-            with SLOTS:  # shares the CPU budget with uploads
-                readings = ocr_ids(im)
-            best = consensus(readings)
-            sure = bool(best)
-            best = best or unsure_guess(readings)
         outcome = 'unchanged'
-        if best:
-            with storage.connection() as c:
-                c.execute('BEGIN IMMEDIATE')
-                if c.execute("SELECT 1 FROM collab_proofs WHERE id=? AND status='manual'", (proof_id,)).fetchone():
-                    status, reason = decide_id(c, best, sure)
-                    if status == 'duplicate':
-                        c.execute("UPDATE collab_proofs SET status='duplicate',cert_id=?,reason=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
-                                  (best, reason, time.time(), proof_id))
-                        outcome = 'duplicate'
-                    elif status == 'manual':
-                        c.execute('UPDATE collab_proofs SET cert_id=?,reason=? WHERE id=?', (best, reason, proof_id))
-                        outcome = 'near'
-                    else:
-                        c.execute("UPDATE collab_proofs SET status='valid',cert_id=?,reason=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
-                                  (best, reason or 'Re-read automatically', time.time(), proof_id))
-                        add_mask(c, best)
-                        outcome = 'valid'
+        with storage.connection() as c:
+            row = c.execute("""SELECT p.thumb,p.status,s.fandom FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id
+                WHERE p.id=? AND p.status IN ('manual','not_enhypen','not_partner')""", (proof_id,)).fetchone()
+            if row and refs and row['fandom'] not in partners:
+                profile = c.execute('SELECT id,name,slots FROM collab_collabs WHERE name=?', (row['fandom'],)).fetchone()
+                slots = json.loads(profile['slots']) if profile else None
+                vecs = [json.loads(r['vec']) for r in c.execute('SELECT vec FROM collab_refs WHERE collab_id=?', (profile['id'],))] if slots else []
+                partners[row['fandom']] = False if profile is None or (slots and not vecs) else ({'name': profile['name'], 'slots': slots, 'vecs': vecs} if slots else None)
+        if row and refs and partners.get(row['fandom']) is not False:
+            with SLOTS:  # shares the CPU budget with uploads
+                status, reason, cert_id, sim, _ = analyse(bytes(row['thumb']), refs, partners[row['fandom']])
+            if status in ('ok', 'unsure'):
+                with storage.connection() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    if c.execute("SELECT 1 FROM collab_proofs WHERE id=? AND status IN ('manual','not_enhypen','not_partner')", (proof_id,)).fetchone():
+                        verdict, why = decide_id(c, cert_id, status == 'ok')
+                        if verdict == 'duplicate':
+                            c.execute("UPDATE collab_proofs SET status='duplicate',cert_id=?,reason=?,similarity=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
+                                      (cert_id, why, sim, time.time(), proof_id))
+                            outcome = 'duplicate'
+                        elif verdict == 'manual':
+                            c.execute("UPDATE collab_proofs SET status='manual',cert_id=?,reason=?,similarity=? WHERE id=?", (cert_id, why, sim, proof_id))
+                            outcome = 'near'
+                        else:
+                            c.execute("UPDATE collab_proofs SET status='valid',cert_id=?,reason=?,similarity=?,thumb=NULL,reviewed_by='reprocess',reviewed_at=? WHERE id=?",
+                                      (cert_id, why or 'Checked again automatically', sim, time.time(), proof_id))
+                            add_mask(c, cert_id)
+                            outcome = 'valid'
+            elif status == 'manual' and row['status'] != 'manual' and reason in OCR_REASONS:
+                # the images are right now, only the ID needs a person
+                with storage.connection() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    moved = c.execute("UPDATE collab_proofs SET status='manual',cert_id=?,reason=?,similarity=? WHERE id=? AND status IN ('not_enhypen','not_partner')",
+                                      (cert_id, reason, sim, proof_id)).rowcount
+                outcome = 'review' if moved else 'unchanged'
         done[outcome] += 1
         if progress:
             progress(n, len(ids))
@@ -783,8 +872,9 @@ def reprocess_status():
         return dict(JOB)
 
 
-def reprocess_start():
-    """Starts reading the OCR-related review proofs again in the background (one run at a time)."""
+def reprocess_start(kind='all'):
+    """Starts checking the review proofs again in the background (one run at a time)."""
+    retry_where(kind)  # validates the list
     if not TESSERACT:
         raise ValueError('The OCR engine (tesseract) is not installed on the server')
     with JOB_LOCK:
@@ -798,7 +888,7 @@ def reprocess_start():
 
     def run():
         try:
-            result = reprocess_review(apply=True, progress=progress)
+            result = reprocess_review(apply=True, progress=progress, kind=kind)
             with JOB_LOCK:
                 JOB.update(result=result)
         except Exception as error:  # reported to the page; the proofs already decided stay decided
@@ -861,7 +951,7 @@ def mutate(path, payload, actor):
             raise ValueError('keys must be a list of at most 2000 strings')
         return {'known': known(keys)}
     if path == '/api/collab/reprocess/start':
-        return reprocess_start()
+        return reprocess_start(payload.get('kind') or 'all')
     match = re.fullmatch(r'/api/collab/proofs/(\d+)/(approve|reject|keep|read)', path)
     if match:
         if match[2] == 'approve':
@@ -892,10 +982,10 @@ if __name__ == '__main__':
     elif args in (['reprocess-review'], ['reprocess-review', '--yes']):
         result = reprocess_review(apply='--yes' in args, progress=lambda n, total: n % 50 == 0 and print(f'  {n}/{total}', flush=True))
         if '--yes' in args:
-            print(f"Re-read {result['eligible']} proofs: {result['valid']} now valid, {result['duplicate']} duplicates, "
-                  f"{result['near']} one character from a counted ID (still in review), {result['unchanged']} still unconfirmed.")
+            print(f"Checked {result['eligible']} proofs again: {result['valid']} now valid, {result['duplicate']} duplicates, "
+                  f"{result['near']} similar to a counted ID (still in review), {result['review']} moved to the verify list, {result['unchanged']} unchanged.")
         else:
-            print(f"{result['eligible']} proofs are in review because of the OCR. Run with --yes to read them again.")
+            print(f"{result['eligible']} proofs in review can be checked again. Run with --yes to do it.")
     else:
         print('Usage: python collab.py reset-proofs --yes        (deletes every uploaded proof; keeps collabs and references)\n'
-              '       python collab.py reprocess-review [--yes]   (reads again the IDs of OCR-related review proofs; without --yes only counts them)')
+              '       python collab.py reprocess-review [--yes]   (checks again the review proofs the checker can change; without --yes only counts them)')

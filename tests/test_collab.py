@@ -63,6 +63,20 @@ def screenshot(cert, size=(1080, 2280), card_width=804, top=650, colored_ad=Fals
     return out.getvalue()
 
 
+def stretched(data, widen=1.07, shift=(8, 0)):
+    """The same certificate with every thumbnail a little wider and moved, as some devices and app versions draw it."""
+    im = Image.open(io.BytesIO(data)).convert('RGB')
+    out = Image.new('RGB', im.size, (240, 240, 255))
+    for box in SLOT_BOXES:
+        piece = im.crop(box)
+        w = round((box[2] - box[0]) * widen)
+        piece = piece.resize((w, box[3] - box[1]), Image.LANCZOS)
+        out.paste(piece, (round((box[0] + box[2]) / 2 - w / 2) + shift[0], box[1] + shift[1]))
+    buf = io.BytesIO()
+    out.save(buf, 'PNG')
+    return buf.getvalue()
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -424,9 +438,64 @@ class InsertedCharacters(unittest.TestCase):
         self.assertIsNone(collab.unsure_guess([None, None]))
 
 
+class Realigned(Base):
+    def test_thumbnails_drawn_wider_or_moved_are_still_recognised(self):
+        wide = stretched(certificate(1), 1.08, (10, 0))
+        standard = collab.open_image(wide)
+        ref = collab.slot_vector(Image.open(io.BytesIO(certificate(1))).convert('RGB'), 2)
+        self.assertLess(collab.correlation(collab.slot_vector(standard, 2), ref), collab.T_OK)   # the fixed slot misses it
+        self.assertEqual(self.send(wide, 'wide', ids=('1010101010101010',) * 2)['status'], 'valid')
+        other = self.send(stretched(certificate(2), 1.08, (10, 0)), 'other-group')
+        self.assertEqual(other['status'], 'not_enhypen')                                           # a different image is not found by the search
+
+    def test_wrongly_rejected_proofs_can_be_checked_again(self):
+        wide = stretched(certificate(1, extra=3), 1.08, (10, 0))
+        with patch.object(collab, 'align', return_value=-1.0):                                    # the old checker
+            self.assertEqual(self.send(wide, 'a', ids=('2020202020202020',) * 2)['status'], 'not_enhypen')
+        self.assertEqual(collab.queue(0, 10, 'groups')['retry_pending'], 1)
+        self.assertEqual(collab.queue(0, 10, 'partner')['retry_pending'], 0)
+        with patch.object(collab, 'ocr_ids', return_value=('2020202020202020',) * 2):
+            counted = collab.reprocess_review(apply=True, kind='groups')
+        self.assertEqual((counted['eligible'], counted['valid']), (1, 1))
+        self.assertEqual(collab.queue(0, 10, 'groups')['total'], 0)
+        self.assertEqual(collab.summary()['submissions'][0]['valid'], 1)
+
+    def test_images_now_right_but_id_unreadable_moves_to_verify(self):
+        wide = stretched(certificate(1, extra=4), 1.08, (10, 0))
+        with patch.object(collab, 'align', return_value=-1.0):
+            self.send(wide, 'b')
+        with patch.object(collab, 'ocr_ids', return_value=(None, None)):
+            result = collab.reprocess_review(apply=True, kind='groups')
+        self.assertEqual((result['review'], result['valid']), (1, 0))
+        self.assertEqual(collab.queue(0, 10, 'manual')['total'], 1)
+        self.assertEqual(collab.queue(0, 10, 'groups')['total'], 0)
+
+
+class LookAlikes(Base):
+    def test_the_same_certificate_read_two_ways_is_not_counted_twice(self):
+        self.assertEqual(self.send(certificate(1), 'a', ids=('61105DUI8D06BAN1',) * 2)['status'], 'valid')
+        # two look-alike differences (8/S and 0/O): not one character away, yet the same certificate
+        twin = self.send(certificate(1, extra=2), 'b', ids=('61105DUISDO6BAN1',) * 2)
+        self.assertEqual(twin['status'], 'manual')
+        self.assertIn('61105DUI8D06BAN1', twin['reason'])
+        self.assertEqual(self.send(certificate(1, extra=3), 'c', ids=('61105DUI9D06BANK',) * 2)['status'], 'valid')   # a different ID
+
+    def test_look_alike_keys_are_added_to_the_ids_already_counted(self):
+        self.send(certificate(1), 'a', ids=('61105DUI8D06BAN1',) * 2)
+        with storage.connection() as c:
+            c.execute("DELETE FROM collab_mask WHERE k LIKE 'F:%'")
+            c.execute("DELETE FROM collab_meta WHERE k='fold_index'")
+        storage.init()
+        with storage.connection() as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM collab_mask WHERE k=?", (collab.fold_key('61105DUI8D06BAN1'),)).fetchone()[0], 1)
+        storage.init()                                                                      # and only once
+        with storage.connection() as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM collab_mask WHERE k LIKE 'F:%'").fetchone()[0], 1)
+
+
 class Reprocess(Base):
     def test_ocr_review_items_are_read_again(self):
-        a, b, c, d = 'AAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBB', 'AAAAAAAAAAAAAAAC', 'DDDDDDDDDDDDDDDD'
+        a, b, c, d = 'AAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBB', 'AAAAAAAAAAAAAAAC', 'EEEEEEEEEEEEEEEE'
         self.send(certificate(1, extra=1), 'counted', ids=(a, a))                     # already valid
         self.assertEqual(self.send(certificate(1, extra=2), 'new', ids=(None, None))['status'], 'manual')
         self.send(certificate(1, extra=3), 'dup', ids=(None, None))
@@ -436,7 +505,7 @@ class Reprocess(Base):
         reads = iter([(b, b), (a, a), (c, c), (None, None)])
         with patch.object(collab, 'ocr_ids', side_effect=lambda im: next(reads)):
             result = collab.reprocess_review(apply=True)
-        self.assertEqual(result, {'eligible': 4, 'valid': 1, 'duplicate': 1, 'near': 1, 'unchanged': 1})
+        self.assertEqual(result, {'eligible': 4, 'valid': 1, 'duplicate': 1, 'near': 1, 'review': 0, 'unchanged': 1})
         with storage.connection() as conn:
             status = {r['file_name']: (r['status'], r['cert_id']) for r in conn.execute('SELECT file_name,status,cert_id FROM collab_proofs')}
         self.assertEqual(status['new.png'], ('valid', b))
@@ -501,7 +570,7 @@ class FlaggedReview(Base):
         import time
         self.send(certificate(1, extra=1), 'a', ids=(None, None))
         self.send(certificate(1, extra=2), 'b', ids=(None, None))
-        self.assertEqual(collab.queue(0, 10)['ocr_pending'], 2)
+        self.assertEqual(collab.queue(0, 10)['retry_pending'], 2)
         reads = iter([('AAAAAAAAAAAAAAAA',) * 2, (None, None)])
         with patch.object(collab, 'ocr_ids', side_effect=lambda im: next(reads)):
             collab.reprocess_start()
@@ -513,7 +582,7 @@ class FlaggedReview(Base):
         self.assertFalse(state['running'])
         self.assertEqual((state['done'], state['total'], state['error']), (2, 2, None))
         self.assertEqual((state['result']['valid'], state['result']['unchanged']), (1, 1))
-        self.assertEqual(collab.queue(0, 10)['ocr_pending'], 1)
+        self.assertEqual(collab.queue(0, 10)['retry_pending'], 1)
 
 
 class Cleanup(Base):

@@ -416,7 +416,7 @@ async function loadQueue() {
     b.querySelector('.seg-count').textContent = body.counts[b.dataset.kind] ? fmt(body.counts[b.dataset.kind]) : '';
   });
   $('#review-note').textContent = KIND_NOTES[kind];
-  renderOcrNotice(body.ocr_pending);
+  renderOcrNotice(body.retry_pending);
   $('#page-info').textContent = body.total ? `${offset + 1}–${offset + body.items.length} of ${fmt(body.total)}` : '';
   $('#prev').disabled = offset === 0; $('#next').disabled = offset + PAGE >= body.total;
   $('.pager').hidden = body.total <= PAGE;
@@ -429,14 +429,20 @@ document.querySelectorAll('#review-kinds button').forEach(b => b.addEventListene
   kind = b.dataset.kind; offset = 0; loadQueue().catch(fail);
 }));
 
-// Proofs waiting only because the OCR could not read the ID can be read again, in the background.
+// Proofs the checker may judge differently now can be checked again, in the background: every list has its own button.
+const RETRY_TEXT = {
+  manual: n => `${fmt(n)} proof${n === 1 ? ' is' : 's are'} here because the ID could not be read or an image was unclear`,
+  groups: n => `${fmt(n)} proof${n === 1 ? ' was' : 's were'} rejected as another group: the ENHYPEN image may be recognised now`,
+  partner: n => `${fmt(n)} proof${n === 1 ? ' was' : 's were'} rejected for the partner image: it may be recognised now`,
+};
 function renderOcrNotice(pending, job) {
   const box = $('#ocr-notice'), button = $('#reread');
-  box.hidden = kind !== 'manual' || (!pending && !(job && job.running));
+  box.hidden = !pending && !(job && job.running);
   if (box.hidden) return;
   $('#ocr-notice-title').textContent = job && job.running
-    ? `Reading again… ${fmt(job.done)} of ${fmt(job.total)}`
-    : `${fmt(pending)} proof${pending === 1 ? ' is' : 's are'} waiting only because the OCR could not confirm the ID`;
+    ? `Checking again… ${fmt(job.done)} of ${fmt(job.total)}`
+    : RETRY_TEXT[kind](pending);
+  $('#ocr-notice-text').textContent = 'Each proof is checked again from its stored image with the current checker (ENHYPEN image, partner image and ID). Proofs that now pass are counted or marked as duplicates; the ones that still fail stay here.';
   let bar = box.querySelector('progress');
   if (job && job.running) {
     if (!bar) { bar = el('progress'); box.append(bar); }
@@ -445,7 +451,7 @@ function renderOcrNotice(pending, job) {
   button.disabled = Boolean(job && job.running);
 }
 $('#reread').addEventListener('click', async () => {
-  try { await request('/api/collab/reprocess/start', {}); } catch (e) { return fail(e); }
+  try { await request('/api/collab/reprocess/start', {kind}); } catch (e) { return fail(e); }
   pollReprocess();
 });
 function pollReprocess() {
@@ -455,9 +461,9 @@ function pollReprocess() {
       renderOcrNotice(0, job); pollTimer = setTimeout(pollReprocess, 1500); return;
     }
     await Promise.all([loadSummary(), loadQueue()]);
-    if (job.error) return toast('error', 'Reading again stopped', job.error);
+    if (job.error) return toast('error', 'Checking again stopped', job.error);
     const r = job.result;
-    if (r) toast('success', 'Read again', `${fmt(r.valid)} now valid, ${fmt(r.duplicate)} duplicates, ${fmt(r.near)} one character from a counted ID, ${fmt(r.unchanged)} still unconfirmed.`);
+    if (r) toast('success', 'Checked again', `${fmt(r.valid)} now valid, ${fmt(r.duplicate)} duplicates, ${fmt(r.near)} similar to a counted ID, ${fmt(r.review)} moved to the verify list, ${fmt(r.unchanged)} unchanged.`);
   }).catch(fail);
 }
 
