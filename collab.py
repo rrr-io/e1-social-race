@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -64,6 +65,9 @@ SCHEMA = '''
       label TEXT NOT NULL, vec TEXT NOT NULL, thumb BLOB NOT NULL, created_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS collab_submissions(id INTEGER PRIMARY KEY, fandom TEXT NOT NULL COLLATE NOCASE,
       day TEXT NOT NULL, created_at REAL NOT NULL, UNIQUE(fandom,day));
+    -- A private link to the report of one batch (collab + proofs date): whoever holds it can review that batch only.
+    CREATE TABLE IF NOT EXISTS collab_shares(submission_id INTEGER PRIMARY KEY REFERENCES collab_submissions(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE, created_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS collab_proofs(id INTEGER PRIMARY KEY,
       submission_id INTEGER NOT NULL REFERENCES collab_submissions(id),
       file_key TEXT NOT NULL UNIQUE, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, cert_id TEXT,
@@ -664,7 +668,7 @@ def summary():
             coalesce(sum(p.status='valid'),0) valid, coalesce(sum(p.status='duplicate'),0) duplicate,
             coalesce(sum(p.status='not_enhypen'),0) not_enhypen, coalesce(sum(p.status='not_partner'),0) not_partner,
             coalesce(sum(p.status='manual'),0) manual,
-            coalesce(sum(p.status='rejected'),0) rejected
+            coalesce(sum(p.status='rejected'),0) rejected, (SELECT token FROM collab_shares WHERE submission_id=s.id) share_token
             FROM collab_submissions s LEFT JOIN collab_proofs p ON p.submission_id=s.id
             GROUP BY s.id ORDER BY s.day DESC, s.fandom COLLATE NOCASE''')]
         refs = [dict(r) for r in c.execute('SELECT id,label,created_at FROM collab_refs WHERE collab_id IS NULL ORDER BY id')]
@@ -712,15 +716,26 @@ def known(keys):
     return found
 
 
-def export_csv(kind, day=''):
+def export_csv(kind, day='', run=None):
+    """CSV exports. `run` (a submission id) limits them to one verification run (collab + proofs date)."""
     out = io.StringIO()
     writer = csv.writer(out)
-    where_day, args = ('WHERE s.day=?', (day,)) if day else ('', ())
+    if run:
+        where_day, args = 'WHERE s.id=?', (run,)
+    else:
+        where_day, args = ('WHERE s.day=?', (day,)) if day else ('', ())
     with storage.connection() as c:
         if kind == 'full':
             writer.writerow(['fandom_collab', 'date', 'file', 'certificate_id', 'result', 'reason', 'reviewed_by'])
             for r in c.execute(f'''SELECT s.fandom,s.day,p.file_name,p.cert_id,p.status,p.reason,p.reviewed_by FROM collab_proofs p
                 JOIN collab_submissions s ON s.id=p.submission_id {where_day} ORDER BY s.day,s.fandom COLLATE NOCASE,p.id''', args):
+                writer.writerow(list(r))
+        elif kind == 'stats':
+            writer.writerow(['Fandom collab', 'Date', 'Files', 'Valid proofs', 'Duplicates', 'Not ENHYPEN', 'Wrong partner image', 'To review', 'Rejected'])
+            for r in c.execute(f'''SELECT s.fandom, s.day, count(p.id), coalesce(sum(p.status='valid'),0), coalesce(sum(p.status='duplicate'),0),
+                coalesce(sum(p.status='not_enhypen'),0), coalesce(sum(p.status='not_partner'),0), coalesce(sum(p.status='manual'),0),
+                coalesce(sum(p.status='rejected'),0) FROM collab_submissions s LEFT JOIN collab_proofs p ON p.submission_id=s.id {where_day}
+                GROUP BY s.id ORDER BY s.day,s.fandom COLLATE NOCASE''', args):
                 writer.writerow(list(r))
         else:
             writer.writerow(['Fandom collab', 'Valid proofs', 'Date'])
@@ -730,7 +745,14 @@ def export_csv(kind, day=''):
     return out.getvalue()
 
 
-def export_name(kind, day):
+def export_name(kind, day, run=None):
+    if run:
+        with storage.connection() as c:
+            row = c.execute('SELECT fandom,day FROM collab_submissions WHERE id=?', (run,)).fetchone()
+        if not row:
+            raise ValueError('Run not found')
+        slug = re.sub(r'[^a-z0-9]+', '-', row['fandom'].lower()).strip('-') or 'collab'
+        return f"mama-{'proofs-report' if kind == 'full' else 'stats'}-{slug}-{row['day']}.csv"
     base = 'mama-proofs-report' if kind == 'full' else 'mama-valid-proofs'
     return f"{base}-{day}.csv" if day else f"{base}-all-as-of-{today()}.csv"
 
@@ -792,6 +814,137 @@ def reject(proof_id, actor):
     if not done:
         raise ValueError('Proof not found or already reviewed')
     return {'ok': True}
+
+
+# ---------------------------------------------------------------- report links (one per batch)
+SHARE_KINDS = {
+    'manual': REVIEW_KINDS['manual'],
+    'groups': REVIEW_KINDS['groups'],
+    'partner': REVIEW_KINDS['partner'],
+    'rejected': "(p.status='rejected' OR (p.status IN ('not_enhypen','not_partner') AND p.reviewed_at IS NOT NULL))",
+}
+
+
+def share_create(submission_id, renew=False):
+    """The private report link token of a batch. Made on first use; `renew` replaces it (the old link stops working)."""
+    with storage.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if not c.execute('SELECT 1 FROM collab_submissions WHERE id=?', (submission_id,)).fetchone():
+            raise ValueError('Batch not found')
+        row = c.execute('SELECT token FROM collab_shares WHERE submission_id=?', (submission_id,)).fetchone()
+        if row and not renew:
+            return {'token': row['token']}
+        token = secrets.token_urlsafe(24)
+        c.execute('INSERT OR REPLACE INTO collab_shares(submission_id,token,created_at) VALUES(?,?,?)', (submission_id, token, time.time()))
+    return {'token': token}
+
+
+def share_revoke(submission_id):
+    with storage.connection() as c:
+        c.execute('DELETE FROM collab_shares WHERE submission_id=?', (submission_id,))
+    return {'ok': True}
+
+
+def share_batch(c, token):
+    row = c.execute("""SELECT s.id,s.fandom,s.day FROM collab_shares h JOIN collab_submissions s ON s.id=h.submission_id
+        WHERE h.token=?""", (clean(token, 80),)).fetchone()
+    if not row:
+        raise LookupError('This link is not valid any more. Ask for a new one.')
+    return row
+
+
+def anonymise(text):
+    """Takes out what would tell a batch about the others: which collab or day an ID was counted for, and the other IDs."""
+    text = re.sub(r'\s*\([^()]*, \d{4}-\d{2}-\d{2}\)', '', text or '')
+    text = re.sub(r'(ounted) for .+? on \d{4}-\d{2}-\d{2}', r'\1 in another batch', text)
+    text = re.sub(r'(?<=from |like )[A-Z0-9]{16}', 'an ID already counted', text)
+    text = re.sub(r'Very similar to [A-Z0-9]{16}', 'Very similar to an ID already counted', text)
+    return text
+
+
+def report(token, kind='manual', offset=0, limit=10):
+    if kind not in SHARE_KINDS:
+        raise ValueError('Unknown list')
+    with storage.connection() as c:
+        batch = share_batch(c, token)
+        counts = dict(c.execute('SELECT status, count(*) FROM collab_proofs WHERE submission_id=? GROUP BY status', (batch['id'],)).fetchall())
+        lists = {k: c.execute(f'SELECT count(*) FROM collab_proofs p WHERE p.submission_id=? AND {w}', (batch['id'],)).fetchone()[0] for k, w in SHARE_KINDS.items()}
+        items = [dict(r) for r in c.execute(f"""SELECT p.id,p.file_name,p.status,p.reason,p.cert_id,p.thumb IS NOT NULL has_image
+            FROM collab_proofs p WHERE p.submission_id=? AND {SHARE_KINDS[kind]} ORDER BY p.id LIMIT ? OFFSET ?""", (batch['id'], limit, offset))]
+    for item in items:
+        item['reason'] = anonymise(item['reason'])
+    counts = {k: counts.get(k, 0) for k in STATUSES}
+    counts['files'] = sum(counts.values())
+    return {'fandom': batch['fandom'], 'day': batch['day'], 'counts': counts, 'lists': lists, 'items': items, 'total': lists[kind]}
+
+
+def report_image(token, proof_id):
+    with storage.connection() as c:
+        batch = share_batch(c, token)
+        row = c.execute('SELECT thumb FROM collab_proofs WHERE id=? AND submission_id=?', (proof_id, batch['id'])).fetchone()
+    if not row or not row['thumb']:
+        raise LookupError('Image not found')
+    return bytes(row['thumb'])
+
+
+def report_csv(token):
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(['file', 'certificate_id', 'result', 'reason'])
+    with storage.connection() as c:
+        batch = share_batch(c, token)
+        for r in c.execute('SELECT file_name,cert_id,status,reason FROM collab_proofs WHERE submission_id=? ORDER BY id', (batch['id'],)):
+            writer.writerow([r['file_name'], r['cert_id'] or '', r['status'], anonymise(r['reason'])])
+    return out.getvalue(), batch
+
+
+def report_act(token, proof_id, action, payload):
+    """Approve, reject, confirm or re-read a proof of this batch, with the same rules as the administrator's review."""
+    with storage.connection() as c:
+        batch = share_batch(c, token)
+        if not c.execute('SELECT 1 FROM collab_proofs WHERE id=? AND submission_id=?', (proof_id, batch['id'])).fetchone():
+            raise LookupError('This proof is not part of this report.')
+    actor = f"link:{batch['fandom']} {batch['day']}"
+    try:
+        if action == 'approve':
+            result = approve(proof_id, payload.get('cert_id', ''), bool(payload.get('confirm_similar')), actor)
+        elif action == 'keep':
+            result = keep(proof_id, actor)
+        elif action == 'read':
+            result = read_proof_id(proof_id)
+        else:
+            result = reject(proof_id, actor)
+    except ValueError as exc:
+        raise ValueError(anonymise(str(exc)))
+    if 'message' in result:
+        result['message'] = anonymise(result['message'])
+    return result
+
+
+def report_get(path, query):
+    """Public GET routes of a batch report (the link is the credential): (status, body, content type[, headers]) or None."""
+    match = re.fullmatch(r'/api/report/([\w-]{20,64})(?:/(proofs/(\d+)/image|export\.csv))?', path)
+    if not match:
+        return None
+    token = match[1]
+    try:
+        if match[3]:
+            return 200, report_image(token, int(match[3])), 'image/jpeg'
+        if match[2]:
+            text, batch = report_csv(token)
+            name = re.sub(r'[^\w-]+', '-', f"{batch['fandom']}-{batch['day']}").strip('-')
+            return 200, text, 'text/csv; charset=utf-8', {'Content-Disposition': f'attachment; filename="proofs-{name}.csv"'}
+        first = lambda name, default: (query.get(name) or [default])[0]
+        return 200, report(token, first('kind', 'manual'), max(0, int(first('offset', '0'))), min(50, max(1, int(first('limit', '10'))))), 'application/json; charset=utf-8'
+    except LookupError as exc:
+        return 404, {'error': str(exc)}, 'application/json; charset=utf-8'
+
+
+def report_post(path, payload):
+    match = re.fullmatch(r'/api/report/([\w-]{20,64})/proofs/(\d+)/(approve|reject|keep|read)', path)
+    if not match:
+        return None
+    return report_act(match[1], int(match[2]), match[3], payload)
 
 
 def retry_where(kind):
@@ -919,8 +1072,11 @@ def get(path, query):
         day = clean((query.get('day') or [''])[0], 10)
         if day:
             day = proofs_day(day)
-        headers = {'Content-Disposition': f'attachment; filename="{export_name(kind, day)}"'}
-        return 200, export_csv(kind, day), 'text/csv; charset=utf-8', headers
+        run = int((query.get('run') or ['0'])[0]) or None
+        if run and (query.get('kind') or [''])[0] == 'stats':
+            kind = 'stats'
+        headers = {'Content-Disposition': f'attachment; filename="{export_name(kind, day, run)}"'}
+        return 200, export_csv(kind, day, run), 'text/csv; charset=utf-8', headers
     match = re.fullmatch(r'/api/collab/(proofs|refs)/(\d+)/image', path)
     if match:
         sql = {'proofs': 'SELECT thumb FROM collab_proofs WHERE id=?', 'refs': 'SELECT thumb FROM collab_refs WHERE id=?'}[match[1]]
@@ -961,6 +1117,11 @@ def mutate(path, payload, actor):
         if match[2] == 'read':
             return read_proof_id(int(match[1]))
         return reject(int(match[1]), actor)
+    match = re.fullmatch(r'/api/collab/submissions/(\d+)/(share|share/renew|share/revoke)', path)
+    if match:
+        if match[2] == 'share/revoke':
+            return share_revoke(int(match[1]))
+        return share_create(int(match[1]), renew=match[2] == 'share/renew')
     if path == '/api/collab/collabs/create':
         return create_collab(payload.get('name', ''), payload.get('slots'))
     match = re.fullmatch(r'/api/collab/collabs/(\d+)/delete', path)

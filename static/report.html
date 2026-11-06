@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0c">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Proofs report</title>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/collab.css">
+<script defer src="/common.js"></script>
+<script defer src="/report.js"></script>
+</head>
+<body>
+<header class="topbar"><span class="brand"><span class="brand-mark" aria-hidden="true">E1</span><span>Proofs report</span></span></header>
+<main>
+  <div class="head-row"><h2 id="title">Proofs report</h2>
+    <span class="head-actions"><button id="refresh" class="btn-ghost" type="button">Refresh</button><button id="csv" class="btn-ghost" type="button">Download CSV</button></span></div>
+  <p id="subtitle" class="section-note"></p>
+  <div id="tiles" class="tiles"></div>
+  <div id="gone" class="banner is-error" role="alert" hidden><div><strong>This link is not valid</strong><p id="gone-text"></p></div></div>
+  <section id="lists" hidden>
+    <h3 class="sub">Proofs to look at</h3>
+    <div id="kinds" class="seg" role="group" aria-label="List">
+      <button type="button" data-kind="manual" aria-pressed="true">To verify <span class="seg-count"></span></button>
+      <button type="button" data-kind="groups" aria-pressed="false">Other groups <span class="seg-count"></span></button>
+      <button type="button" data-kind="partner" aria-pressed="false">Wrong partner image <span class="seg-count"></span></button>
+      <button type="button" data-kind="rejected" aria-pressed="false">Rejected <span class="seg-count"></span></button>
+    </div>
+    <p id="note" class="section-note"></p>
+    <div class="pager head-row"><button id="prev" class="btn-ghost" type="button">← Previous</button><span id="page-info" class="muted"></span><button id="next" class="btn-ghost" type="button">Next →</button></div>
+    <div id="queue"></div>
+  </section>
+</main>
+</body>
+</html>

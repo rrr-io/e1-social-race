@@ -57,3 +57,14 @@ Each file has a key (fandom, path, size, modification time). The page asks the s
 **Thumbnails that are drawn differently.** Some devices and app versions draw the three thumbnails a little wider, narrower or lower than the standard export. When the image does not match at the standard position, its position and size are searched for (a coarse search refined in a few steps, about 0.1 s) before it is judged. The same photo then scores above 0.98 instead of 0.4-0.8, while a different image stays far below the threshold. Images whose proportions differ from the export by up to 8% are accepted as certificates (5% before).
 
 **One certificate, two spellings.** The OCR cannot tell O from 0 or 8 from S in this font, so the same certificate can be read in two ways. Every counted ID also has a look-alike key (O/0/Q/D/9/5/S/8/B are folded together, and the other look-alike pairs). A new ID with the same look-alike key as a counted one goes to review instead of being counted twice, even when it differs in several characters.
+
+## Report link for every batch
+
+Teams send their folder to the organiser, who uploads it. In the **Recap** table each batch (collab + proofs date) has a **Make link** button: it copies a private page address (`/report/<secret>`) to send to whoever asked for the verification.
+
+- The page shows that batch's numbers (valid, duplicates, to verify, other group, wrong partner image, rejected) and lists the proofs to look at: **To verify**, **Other groups**, **Wrong partner image** and the confirmed **Rejected**. The requester can read the ID again, correct it, and accept or reject each proof, exactly like the organiser's Review tab. "Download CSV" gives the batch's results.
+- The link is the only credential: it opens that one batch and nothing else (no other collab, no admin page). Messages never say which other collab or day an ID was counted for, and other IDs are not shown; the requester only learns that an ID is a duplicate or one character from one already counted.
+- Reviews done from a link are saved as `link:<collab> <date>` in the full report CSV. "Copy link" gives the same link again; **Stop sharing** switches it off at once.
+- The page is not indexed by search engines and sends no referrer. Treat the link like a password: anyone who has it can review that batch.
+
+The Recap table has one row per verification run (collab + proofs date). Each row has **Card** (the share image: collab name, valid proofs and the run date), **Stats CSV** (the run's counts), **Report CSV** (the result of every file of the run) and the report link. Uploading more files for the same collab and date adds them to the same run.

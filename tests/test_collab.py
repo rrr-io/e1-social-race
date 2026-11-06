@@ -272,6 +272,67 @@ class Partners(Base):
         self.assertEqual(len(listed['Lingshot']['refs']), 1)
 
 
+
+class ReportLinks(Base):
+    def setUp(self):
+        super().setUp()
+        self.send(certificate(1, extra=1), 'a1', ids=('AAAAAAAAAAAAAAAA',) * 2, fandom='Fandom A')
+        self.b = self.send(certificate(1, extra=2), 'b1', ids=('AAAAAAAAAAAAAAAB',) * 2, fandom='Fandom B')   # one character from A's ID
+        self.sub_a = collab.summary()['submissions']
+        ids = {r['fandom']: r['id'] for r in self.sub_a}
+        self.token_a, self.token_b = (collab.share_create(ids[f])['token'] for f in ('Fandom A', 'Fandom B'))
+
+    def test_report_shows_only_its_batch_and_hides_the_others(self):
+        self.assertEqual(self.b['status'], 'manual')
+        r = collab.report(self.token_b, 'manual')
+        self.assertEqual((r['fandom'], r['counts']['manual'], r['counts']['files'], r['total']), ('Fandom B', 1, 1, 1))
+        text = json.dumps(r)
+        for secret in ('Fandom A', 'AAAAAAAAAAAAAAAA'):
+            self.assertNotIn(secret, text)
+        self.assertIn('differs by one character', r['items'][0]['reason'])
+        self.assertEqual(collab.report(self.token_a, 'manual')['total'], 0)
+        self.assertEqual(collab.report(self.token_a, 'rejected')['total'], 0)
+
+    def test_requester_can_accept_or_reject_only_its_own_proofs(self):
+        proof = self.b['id']
+        other = collab.report(self.token_a)['counts']['files']
+        with self.assertRaises(LookupError):
+            collab.report_act(self.token_a, proof, 'reject', {})           # the link of another batch
+        with self.assertRaises(LookupError):
+            collab.report_act('x' * 30, proof, 'reject', {})
+        first = collab.report_act(self.token_b, proof, 'approve', {'cert_id': 'AAAAAAAAAAAAAAAB'})
+        self.assertTrue(first['needs_confirmation'])
+        self.assertNotIn('AAAAAAAAAAAAAAAA', first['message'])
+        self.assertNotIn('Fandom A', first['message'])
+        collab.report_act(self.token_b, proof, 'approve', {'cert_id': 'AAAAAAAAAAAAAAAB', 'confirm_similar': True})
+        self.assertEqual(collab.report(self.token_b)['counts']['valid'], 1)
+        self.assertEqual(collab.report(self.token_a)['counts']['files'], other)
+        with self.assertRaises(ValueError) as caught:                     # an ID counted elsewhere: told without saying where
+            collab.report_act(self.token_b, self.b['id'], 'approve', {'cert_id': 'AAAAAAAAAAAAAAAA'})
+        self.assertNotIn('Fandom', str(caught.exception))
+        with storage.connection() as c:
+            self.assertEqual(c.execute('SELECT reviewed_by FROM collab_proofs WHERE id=?', (proof,)).fetchone()[0], 'link:Fandom B ' + self.b['day'])
+
+    def test_reject_and_revoke(self):
+        collab.report_act(self.token_b, self.b['id'], 'reject', {})
+        r = collab.report(self.token_b, 'rejected')
+        self.assertEqual((r['total'], r['counts']['rejected']), (1, 1))
+        self.assertEqual(collab.share_create(collab.summary()['submissions'][0]['id'])['token'] in (self.token_a, self.token_b), True)   # same link every time
+        sub = {r['fandom']: r['id'] for r in collab.summary()['submissions']}['Fandom B']
+        new = collab.share_create(sub, renew=True)['token']
+        with self.assertRaises(LookupError):
+            collab.report(self.token_b)
+        collab.share_revoke(sub)
+        with self.assertRaises(LookupError):
+            collab.report(new)
+
+    def test_csv_hides_other_batches(self):
+        text, _ = collab.report_csv(self.token_b)
+        self.assertIn('b1.png', text)
+        self.assertNotIn('a1.png', text)
+        self.assertNotIn('Fandom A', text)
+
+
 class HTTP(Base):
     def setUp(self):
         super().setUp()
@@ -302,6 +363,41 @@ class HTTP(Base):
             response = error
         with response:
             return response.status, response.read()
+
+    def test_report_link_works_without_signing_in(self):
+        self.send(certificate(1, extra=1), 'a1', ids=('AAAAAAAAAAAAAAAA',) * 2, fandom='Fandom A')
+        b = self.send(certificate(1, extra=2), 'b1', ids=('AAAAAAAAAAAAAAAB',) * 2, fandom='Fandom B')
+        subs = {r['fandom']: r['id'] for r in collab.summary()['submissions']}
+        token = json.loads(self.call(f"/api/collab/submissions/{subs['Fandom B']}/share", {})[1])['token']
+        other = json.loads(self.call(f"/api/collab/submissions/{subs['Fandom A']}/share", {})[1])['token']
+        self.assertEqual(self.call(f'/api/collab/submissions/{subs["Fandom B"]}/share', {}, auth=False)[0], 401)   # making links is for the administrator
+        status, page = self.call(f'/report/{token}', auth=False)
+        self.assertEqual((status, b'noindex' in page), (200, True))
+        self.assertEqual(self.call('/report.js', auth=False)[0], 200)
+        status, body = self.call(f'/api/report/{token}?kind=manual', auth=False)
+        data = json.loads(body)
+        self.assertEqual((status, data['fandom'], data['total']), (200, 'Fandom B', 1))
+        self.assertEqual(self.call(f'/api/report/{token}/proofs/{b["id"]}/image', auth=False)[0], 200)
+        self.assertEqual(self.call(f'/api/report/{other}/proofs/{b["id"]}/image', auth=False)[0], 404)       # not this batch's proof
+        self.assertEqual(self.call('/api/report/' + 'z' * 32, auth=False)[0], 404)
+        self.assertEqual(self.call(f'/api/report/{token}/export.csv', auth=False)[0], 200)
+        self.assertEqual(self.call(f'/api/report/{other}/proofs/{b["id"]}/reject', {}, auth=False)[0], 404)
+        status, body = self.call(f'/api/report/{token}/proofs/{b["id"]}/reject', {}, auth=False)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.call('/api/collab/summary', auth=False)[0], 401)                                 # the admin data stays closed
+        self.assertEqual(self.call(f'/api/collab/proofs/{b["id"]}/image', auth=False)[0], 401)
+
+    def test_export_of_one_run(self):
+        self.send(certificate(1, extra=1), "a1", ids=("AAAAAAAAAAAAAAAA",) * 2, fandom="Fandom A")
+        self.send(certificate(1, extra=2), "b1", ids=("BBBBBBBBBBBBBBBB",) * 2, fandom="Fandom B")
+        run = {r["fandom"]: r["id"] for r in collab.summary()["submissions"]}["Fandom B"]
+        status, body = self.call(f"/api/collab/export.csv?kind=stats&run={run}")
+        self.assertEqual(status, 200)
+        lines = body.decode().strip().splitlines()
+        self.assertEqual((len(lines), lines[1].split(",")[0], lines[1].split(",")[3]), (2, "Fandom B", "1"))
+        self.assertIn("BBBBBBBBBBBBBBBB", self.call(f"/api/collab/export.csv?kind=full&run={run}")[1].decode())
+        self.assertNotIn("AAAAAAAAAAAAAAAA", self.call(f"/api/collab/export.csv?kind=full&run={run}")[1].decode())
+        self.assertRegex(collab.export_name("stats", "", run), r"^mama-stats-fandom-b-\d{4}-\d{2}-\d{2}\.csv$")
 
     def test_export_download_has_dated_filename(self):
         with urllib.request.urlopen(urllib.request.Request(self.base + '/api/collab/export.csv?kind=summary&day=2026-11-01', headers={

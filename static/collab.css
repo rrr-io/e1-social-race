@@ -105,3 +105,9 @@ tr.total td{font-weight:700;border-top:2px solid var(--line-strong)}
 .id-row label{margin:0}
 .id-row input{margin-top:4px}
 #ocr-notice progress{width:100%;margin-top:8px;accent-color:var(--accent)}
+
+.run-actions{min-width:300px}
+.run-actions button{margin:0 6px 6px 0;padding:8px 12px}
+.run-actions span{display:inline}
+.run-actions{white-space:normal!important;min-width:0;width:230px}
+.run-actions button{display:inline-block}

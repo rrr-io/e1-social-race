@@ -83,10 +83,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/race':
             return self.reply(200, race.read())
         public = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css'),
-                  '/common.js': ('common.js', 'application/javascript'), '/common.css': ('common.css', 'text/css'),
+                  '/common.js': ('common.js', 'application/javascript'), '/report.js': ('report.js', 'application/javascript'),
+                  '/style.css': ('style.css', 'text/css'), '/collab.css': ('collab.css', 'text/css'), '/common.css': ('common.css', 'text/css'),
                   '/e1-logo.png': ('e1-logo.png', 'image/png'), '/favicon.ico': ('favicon.ico', 'image/x-icon'),
                   '/favicon-32.png': ('favicon-32.png', 'image/png'), '/apple-touch-icon.png': ('apple-touch-icon.png', 'image/png'),
                   '/icon-512.png': ('icon-512.png', 'image/png'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json')}
+        if re.fullmatch(r'/report/[\w-]{20,64}', path):  # the link itself is the credential; keep it out of search engines and referrers
+            return self.reply(200, (STATIC / 'report.html').read_bytes(), 'text/html; charset=utf-8',
+                              {'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer'})
+        if path.startswith('/api/report/'):
+            try:
+                result = collab.report_get(path, parse_qs(urlsplit(self.path).query))
+            except (ValueError, TypeError) as exc:
+                return self.reply(400, {'error': str(exc)})
+            if result:
+                status, body, mime, *headers = result
+                return self.reply(status, body, mime, {'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer', **(headers[0] if headers else {})})
         if path in public:
             filename, mime = public[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
@@ -94,9 +106,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == '/api/race/admin':
             return self.reply(200, race.read(admin=True))
-        admin_files = {'/admin': ('index.html', 'text/html'), '/app.js': ('app.js', 'application/javascript'), '/style.css': ('style.css', 'text/css'),
+        admin_files = {'/admin': ('index.html', 'text/html'), '/app.js': ('app.js', 'application/javascript'),
                        '/admin.js': ('admin.js', 'application/javascript'), '/admin.css': ('admin.css', 'text/css'), '/share.js': ('share.js', 'application/javascript'),
-                       '/collab-verify': ('collab.html', 'text/html'), '/collab.js': ('collab.js', 'application/javascript'), '/collab.css': ('collab.css', 'text/css')}
+                       '/collab-verify': ('collab.html', 'text/html'), '/collab.js': ('collab.js', 'application/javascript')}
         if path in admin_files:
             filename, mime = admin_files[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
@@ -140,7 +152,30 @@ class Handler(BaseHTTPRequestHandler):
             logging.exception('Collab upload failure')
             self.reply(500, {'error': 'Internal server error'})
 
+    def report_post(self):
+        # Review actions from a batch report link: no sign-in, the secret link names the one batch that can be changed.
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= 8192 or self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+                raise ValueError('Invalid request')
+            payload = json.loads(self.rfile.read(size))
+            if not isinstance(payload, dict):
+                raise ValueError('Invalid JSON')
+            result = collab.report_post(urlsplit(self.path).path, payload)
+            return self.reply(200, result) if result is not None else self.reply(404, {'error': 'Resource not found'})
+        except LookupError as exc:
+            self.reply(404, {'error': str(exc)})
+        except (ValueError, TypeError) as exc:
+            self.reply(400, {'error': str(exc)})
+        except Exception:
+            logging.exception('Report action failure')
+            self.reply(500, {'error': 'Internal server error'})
+
     def do_POST(self):
+        if urlsplit(self.path).path.startswith('/api/report/'):
+            if self.headers.get('Origin') not in (None, PUBLIC_ORIGIN):
+                return self.reply(403, {'error': 'Origin not allowed. Check PUBLIC_ORIGIN.'})
+            return self.report_post()
         if not self.authenticated():
             return
         if self.headers.get('Origin') not in (None, PUBLIC_ORIGIN):

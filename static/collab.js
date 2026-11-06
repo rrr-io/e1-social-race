@@ -81,6 +81,43 @@ function sumCounts(rows) {
 }
 
 // ---------------------------------------------------------------- recap
+// A private link to the report of one batch: the requester sees the numbers and the doubtful and rejected proofs, and can approve or reject them.
+const reportUrl = token => `${location.origin}/report/${token}`;
+async function copyLink(text) {
+  try { await navigator.clipboard.writeText(text); toast('success', 'Link copied', 'Send it to whoever sent this batch.'); }
+  catch { prompt('Copy this link', text); }
+}
+function runCell(s) {
+  const td = el('td', 'run-actions');
+  const csv = (label, kind) => { const b = el('button', 'btn-ghost', label); b.type = 'button'; b.addEventListener('click', () => { location.href = `/api/collab/export.csv?kind=${kind}&run=${s.id}`; }); return b; };
+  const card = el('button', 'btn-ghost', 'Card'); card.type = 'button';
+  card.setAttribute('aria-label', `Download the share card of ${s.fandom}, ${s.day}`);
+  card.addEventListener('click', () => downloadCard(s, card));
+  td.append(card, ' ', csv('Stats CSV', 'stats'), ' ', csv('Report CSV', 'full'), ' ', shareCell(s));
+  return td;
+}
+function shareCell(s) {
+  const td = el('span');
+  const main = el('button', 'btn-ghost', s.share_token ? 'Copy link' : 'Make link'); main.type = 'button';
+  main.addEventListener('click', async () => {
+    main.disabled = true;
+    try {
+      const token = s.share_token || (await request(`/api/collab/submissions/${s.id}/share`, {})).token;
+      await copyLink(reportUrl(token)); if (!s.share_token) await loadSummary();
+    } catch (e) { fail(e); } finally { main.disabled = false; }
+  });
+  td.append(main);
+  if (s.share_token) {
+    const stop = el('button', 'btn-ghost', 'Stop sharing'); stop.type = 'button';
+    stop.addEventListener('click', async () => {
+      if (!confirm(`Stop sharing the report of ${s.fandom} (${s.day})? The link stops working at once.`)) return;
+      try { await request(`/api/collab/submissions/${s.id}/share/revoke`, {}); await loadSummary(); } catch (e) { fail(e); }
+    });
+    td.append(' ', stop);
+  }
+  return td;
+}
+
 function renderRecap() {
   const select = $('#recap-day'), previous = select.value;
   const days = [...new Set(data.submissions.map(s => s.day))].sort().reverse();
@@ -99,17 +136,18 @@ function renderRecap() {
     const valid = el('td', 'num'); valid.append(el('strong', null, fmt(s.valid))); tr.append(valid);
     tr.append(el('td', null, s.day));
     for (const k of COUNTS) tr.append(el('td', 'num', fmt(s[k])));
+    tr.append(runCell(s));
     body.append(tr);
   }
   if (!rows.length) {
-    const tr = el('tr'); const td = el('td', 'muted', 'No proofs uploaded yet.'); td.colSpan = 9; tr.append(td); body.append(tr);
+    const tr = el('tr'); const td = el('td', 'muted', 'No proofs uploaded yet.'); td.colSpan = 10; tr.append(td); body.append(tr);
   } else {
     const tr = el('tr', 'total'); tr.append(el('td', null, 'Total'), el('td', 'num', fmt(total.valid)), el('td'));
     for (const k of COUNTS) tr.append(el('td', 'num', fmt(total[k])));
+    tr.append(el('td'));
     body.append(tr);
   }
   labelCells($('#summary-table'));
-  renderCards(select.value);
 }
 $('#recap-day').addEventListener('change', renderRecap);
 const exportUrl = kind => `/api/collab/export.csv?kind=${kind}&day=${encodeURIComponent($('#recap-day').value)}`;
@@ -123,16 +161,21 @@ const logo = new Image(); logo.src = '/e1-logo.png';
 const logoReady = new Promise(resolve => { logo.onload = logo.onerror = resolve; });
 const niceDay = d => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'}).toUpperCase();
 
-// Per collab: the days with their valid proofs (just the selected day when a date is chosen) and the total.
-function cardData(day) {
-  const by = new Map();
-  for (const s of data.submissions.filter(x => !day || x.day === day)) {
-    const r = by.get(s.fandom) || {fandom: s.fandom, valid: 0, days: []};
-    r.valid += s.valid; r.days.push({day: s.day, valid: s.valid}); by.set(s.fandom, r);
-  }
-  for (const r of by.values()) r.days.sort((a, b) => a.day.localeCompare(b.day));
-  return [...by.values()].sort((a, b) => b.valid - a.valid || a.fandom.localeCompare(b.fandom));
+
+async function downloadCard(s, button) {
+  busy(button, true, 'Creating…');
+  try {
+    await logoReady;
+    const blob = await new Promise((resolve, reject) => drawCard({fandom: s.fandom, valid: s.valid, days: [{day: s.day, valid: s.valid}]}, s.day)
+      .toBlob(b => b ? resolve(b) : reject(new Error('The browser could not create the image')), 'image/png'));
+    const link = el('a'); link.href = URL.createObjectURL(blob);
+    link.download = `enhypen-proofs-${slugOf(s.fandom)}-${s.day}.png`;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  } catch (e) { fail(e); }
+  finally { release(button); }
 }
+const slugOf = name => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collab';
 
 function fitText(ctx, text, width, size, weight) {
   let s = size; ctx.font = `${weight} ${s}px ${SANS}`;
@@ -153,8 +196,6 @@ function drawCard(r, day) {
   ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#ff7a1a'; ctx.fillRect(0, 0, W, 12);
   if (logo.naturalWidth) ctx.drawImage(logo, PAD, 70, 130, 130 * logo.naturalHeight / logo.naturalWidth);
-  ctx.textAlign = 'right'; ctx.fillStyle = '#a3a3ad'; ctx.font = `600 28px ${SANS}`;
-  ctx.fillText(day ? niceDay(day) : r.days.length > 1 ? `${niceDay(r.days[0].day)} – ${niceDay(r.days[r.days.length - 1].day)}` : niceDay(r.days[0].day), W - PAD, 150);
   ctx.textAlign = 'left'; ctx.fillStyle = '#ff7a1a'; ctx.font = `700 26px ${SANS}`; spaced(ctx, 5);
   ctx.fillText('MAMA 2026 · VOTING PROOFS', PAD, 330); spaced(ctx, 0);
   ctx.fillStyle = '#f2f2f4'; ctx.fillText(fitText(ctx, r.fandom, W - 2 * PAD, 76, 800), PAD, 420);
@@ -162,7 +203,8 @@ function drawCard(r, day) {
   ctx.font = `900 ${r.valid >= 100000 ? 190 : 230}px ${SANS}`; ctx.fillStyle = '#ff7a1a';
   ctx.fillText(fmt(r.valid), PAD - 6, 700);
   ctx.fillStyle = '#f2f2f4'; ctx.font = `700 40px ${SANS}`; ctx.fillText(`valid proof${r.valid === 1 ? '' : 's'}`, PAD, 806);
-  let y = 896;
+  ctx.fillStyle = '#ff9a4d'; ctx.font = `700 34px ${SANS}`; ctx.fillText(day ? niceDay(day) : r.days.length > 1 ? `${niceDay(r.days[0].day)} – ${niceDay(r.days[r.days.length - 1].day)}` : niceDay(r.days[0].day), PAD, 862);
+  let y = 940;
   if (list) {
     ctx.strokeStyle = '#2a2a33'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(PAD, y - 22); ctx.lineTo(W - PAD, y - 22); ctx.stroke();
     for (const d of shown) {
@@ -175,32 +217,6 @@ function drawCard(r, day) {
   ctx.textAlign = 'left'; ctx.fillStyle = '#7a7a85'; ctx.font = `500 24px ${SANS}`;
   ctx.fillText('Unique Mnet Plus certificates, verified one by one.', PAD, H - 64);
   return canvas;
-}
-
-function renderCards(day) {
-  const box = $('#cards'); box.replaceChildren();
-  const rows = cardData(day);
-  if (!rows.length) { box.append(el('p', 'muted', 'No proofs yet.')); return; }
-  for (const r of rows) {
-    const item = el('div', 'card-row'), info = el('div');
-    info.append(el('strong', null, r.fandom), el('span', null, `${fmt(r.valid)} valid proof${r.valid === 1 ? '' : 's'}`));
-    const button = el('button', 'btn-ghost', 'Download card'); button.type = 'button';
-    button.setAttribute('aria-label', `Download the share card for ${r.fandom}`);
-    button.addEventListener('click', async () => {
-      busy(button, true, 'Creating…');
-      try {
-        await logoReady;
-        const blob = await new Promise((resolve, reject) => drawCard(r, day).toBlob(b => b ? resolve(b) : reject(new Error('The browser could not create the image')), 'image/png'));
-        const link = el('a'); link.href = URL.createObjectURL(blob);
-        const slug = r.fandom.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collab';
-        link.download = `enhypen-proofs-${slug}-${day || `all-as-of-${localToday()}`}.png`;
-        document.body.append(link); link.click(); link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
-      } catch (e) { fail(e); }
-      finally { release(button); }
-    });
-    item.append(info, button); box.append(item);
-  }
 }
 
 // ---------------------------------------------------------------- references
