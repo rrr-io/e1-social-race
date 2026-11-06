@@ -483,7 +483,7 @@ function proofCard(item) {
   const ok = el('button', null, 'Valid ENHYPEN proof'), no = el('button', 'btn-ghost', flagged ? 'Confirm: not valid' : 'Reject');
   ok.type = no.type = 'button';
   const row = el('div', 'id-row'); row.append(label);
-  if (flagged) {  // these were rejected before the ID was read: read it on request
+  if (item.has_image) {  // reads the ID again on request: correcting a nearly right ID is easier than typing it all (and some proofs have none yet)
     const read = el('button', 'btn-ghost', 'Read ID from image'); read.type = 'button';
     read.addEventListener('click', async () => {
       busy(read, true, 'Reading…'); msg.textContent = '';

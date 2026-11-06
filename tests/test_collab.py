@@ -158,6 +158,11 @@ class Verification(Base):
         self.assertEqual(held['status'], 'manual')
         self.assertEqual(collab.summary()['submissions'][0]['valid'], 3)
 
+    def test_the_id_of_a_proof_in_verify_can_be_read_again_from_its_image(self):
+        pending = self.send(certificate(1), 'a', ids=('AAAAAAAAAAAAAAAA', 'AAAAAAAAAAAAAAAK'))   # the OCR could not decide
+        with patch.object(collab, 'ocr_ids', return_value=('6666666666666666',) * 3):
+            self.assertEqual(collab.read_proof_id(pending['id']), {'cert_id': '6666666666666666', 'confident': True})
+
     def test_one_character_difference_is_not_counted_automatically(self):
         self.assertEqual(self.send(certificate(1), 'a', ids=('61105JDXSVKA6VXC',) * 2)['status'], 'valid')
         near = self.send(certificate(1, extra=10), 'b', ids=('61105JDXSVKA6VXO',) * 2)
