@@ -537,10 +537,53 @@ function proofCard(item) {
 $('#prev').addEventListener('click', () => { offset = Math.max(0, offset - PAGE); loadQueue().catch(fail); });
 $('#next').addEventListener('click', () => { offset += PAGE; loadQueue().catch(fail); });
 
+// ---------------------------------------------------------------- Google Drive import (the server downloads and checks the images)
+let drivePoll = null;
+function drawDrive(job) {
+  $('#drive-off').hidden = job.configured;
+  $('#drive-start').disabled = !job.configured || job.running; $('#drive-stop').hidden = !job.running;
+  const shown = job.running || job.phase === 'done' || job.phase === 'stopped';
+  $('#drive-run').hidden = !shown && !job.error;
+  if ($('#drive-run').hidden) return;
+  const pct = job.total ? job.done / job.total * 100 : job.phase === 'listing' ? 0 : 100;
+  $('#drive-fill').style.width = `${pct}%`; $('#drive-bar').setAttribute('aria-valuenow', String(Math.round(pct)));
+  const rate = job.done / Math.max((Date.now() / 1000 - job.started), 1);
+  let text = job.phase === 'listing' ? `Reading the Drive folder… ${fmt(job.found)} images found`
+    : `${job.fandom} · ${job.day}: ${fmt(job.done)} of ${fmt(job.total)} files · ${rate.toFixed(1)} per second` + (job.running && job.done ? ` · about ${E1.duration((job.total - job.done) / rate)} left` : '') +
+      (job.skipped ? ` · ${fmt(job.skipped)} already processed, skipped` : '');
+  if (job.stopping && job.running) text += ' · Stopping…';
+  else if (job.phase === 'done') text += job.error ? '' : ' · Done.';
+  else if (job.phase === 'stopped') text += ' · Stopped. Import the same link again to continue.';
+  if (job.error) text = `${text ? text + ' · ' : ''}${job.error}`;
+  $('#drive-text').textContent = text;
+  const c = job.counts || {};
+  $('#drive-chips').replaceChildren(chip('ok', `${fmt(c.valid || 0)} valid`), chip('warn', `${fmt(c.manual || 0)} to review`), chip('err', `${fmt(c.duplicate || 0)} duplicates`),
+    chip('err', `${fmt(c.not_enhypen || 0)} not ENHYPEN`), chip('err', `${fmt(c.not_partner || 0)} wrong partner image`), ...(job.failed ? [chip('err', `${fmt(job.failed)} failed`)] : []));
+  $('#drive-errors').replaceChildren(...job.errors.map(t => el('li', null, t)));
+}
+async function refreshDrive() {
+  clearTimeout(drivePoll);
+  const job = await request('/api/collab/import');
+  drawDrive(job);
+  if (job.running) drivePoll = setTimeout(() => refreshDrive().catch(() => {}), 1500);
+  else if (job.phase) { offset = 0; Promise.all([loadSummary(), loadQueue()]).catch(() => {}); }
+}
+$('#drive-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!$('#collab').value) return toast('error', 'Collab missing', 'Choose the collab these proofs belong to before starting.');
+  if (!$('#proofs-date').value) return toast('error', 'Date missing', 'Enter the date the votes refer to.');
+  try { drawDrive(await request('/api/collab/import/start', {url: $('#drive-url').value, fandom: $('#collab').value, day: $('#proofs-date').value})); }
+  catch (e) { return fail(e); }
+  drivePoll = setTimeout(() => refreshDrive().catch(fail), 1000);
+});
+$('#drive-stop').addEventListener('click', async () => {
+  try { drawDrive(await request('/api/collab/import/stop', {})); } catch (e) { fail(e); }
+});
+
 // ---------------------------------------------------------------- start
 $('#proofs-date').value = localToday(); $('#proofs-date').max = localToday();
 activate();
-Promise.all([loadSummary(), loadQueue()]).then(() => { request('/api/collab/reprocess').then(j => j.running && pollReprocess()).catch(() => {});
+Promise.all([loadSummary(), loadQueue()]).then(() => { request('/api/collab/reprocess').then(j => j.running && pollReprocess()).catch(() => {}); refreshDrive().catch(() => {});
   if (!location.hash && data.refs.length && data.collabs.length) location.hash = 'upload';  // setup is done: go straight to uploading
 }).catch(fail);
 })();

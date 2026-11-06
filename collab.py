@@ -18,7 +18,11 @@ import sqlite3
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
+
+from urllib.parse import urlencode, urlsplit
 
 from PIL import Image, ImageOps
 
@@ -1056,6 +1060,205 @@ def reprocess_start(kind='all'):
     return reprocess_status()
 
 
+# ---------------------------------------------------------------- import from Google Drive
+# The server reads a public Drive folder (or file) itself, so nothing has to be downloaded on the organiser's device.
+# It needs a Google API key (Drive API) in GOOGLE_API_KEY; the folder must be shared as "anyone with the link".
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '').strip()
+DRIVE_API = 'https://www.googleapis.com/drive/v3/files'
+DRIVE_ID = r'[A-Za-z0-9_-]{10,100}'
+DRIVE_FOLDER = 'application/vnd.google-apps.folder'
+DRIVE_LANES = 3          # files downloaded and checked at the same time
+DRIVE_MAX_FILES = 60000
+DRIVE_MAX_DEPTH = 8
+IMAGE_NAME = re.compile(r'\.(png|jpe?g|webp|gif|bmp|heic|heif)$', re.I)
+IMPORT_LOCK = threading.Lock()
+IMPORT = {'running': False, 'stopping': False, 'phase': '', 'source': '', 'fandom': '', 'day': '', 'found': 0, 'skipped': 0, 'total': 0, 'done': 0,
+          'counts': {}, 'failed': 0, 'errors': [], 'error': None, 'started': 0.0, 'finished': 0.0}
+
+
+class DriveError(Exception):
+    def __init__(self, message, retry=False):
+        super().__init__(message)
+        self.retry = retry
+
+
+def drive_target(url):
+    """('folder' | 'file' | 'any', id) from a Google Drive link."""
+    url = clean(url, 500)
+    parts = urlsplit(url)
+    if parts.scheme not in ('http', 'https') or parts.hostname not in ('drive.google.com', 'docs.google.com'):
+        raise ValueError('Paste a Google Drive link (drive.google.com)')
+    for pattern, kind in ((rf'/folders/({DRIVE_ID})', 'folder'), (rf'/file/d/({DRIVE_ID})', 'file'), (rf'[?&]id=({DRIVE_ID})', 'any')):
+        found = re.search(pattern, url)
+        if found:
+            return kind, found[1]
+    raise ValueError('This does not look like a link to a Drive folder or file')
+
+
+def drive_open(url, limit=None):
+    """GET to the Drive API with the key; raises DriveError with a message people can act on."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={'Accept': 'application/json'}), timeout=60) as response:
+            return response.read(limit) if limit else response.read()
+    except urllib.error.HTTPError as error:
+        body = error.read(2000).decode('utf-8', 'ignore')
+        if error.code in (429, 500, 502, 503, 504) or 'ateLimit' in body or 'uotaExceeded' in body:
+            raise DriveError('Google is limiting the downloads right now', retry=True)
+        if error.code == 400 and 'API key' in body:
+            raise DriveError('The Google API key is not valid: check GOOGLE_API_KEY')
+        if error.code == 403 and ('accessNotConfigured' in body or 'has not been used' in body or 'SERVICE_DISABLED' in body):
+            raise DriveError('The Drive API is not enabled for this API key: enable it in Google Cloud')
+        if error.code in (401, 403, 404):
+            raise DriveError('Google Drive says this is not found or not shared. Set it to "Anyone with the link can view".')
+        raise DriveError(f'Google Drive answered HTTP {error.code}')
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise DriveError('Could not reach Google Drive', retry=True)
+
+
+def drive_call(url, limit=None):
+    for attempt in range(4):
+        try:
+            return drive_open(url, limit)
+        except DriveError as error:
+            if not error.retry or attempt == 3:
+                raise
+            time.sleep(1.5 * (attempt + 1))
+
+
+def drive_json(file_id=None, **params):
+    params['key'] = GOOGLE_API_KEY
+    params.setdefault('supportsAllDrives', 'true')
+    return json.loads(drive_call(f"{DRIVE_API}{'/' + file_id if file_id else ''}?{urlencode(params)}"))
+
+
+def drive_bytes(file_id):
+    query = urlencode({'alt': 'media', 'key': GOOGLE_API_KEY, 'supportsAllDrives': 'true'})
+    data = drive_call(f'{DRIVE_API}/{file_id}?{query}', MAX_UPLOAD + 1)
+    if len(data) > MAX_UPLOAD:
+        raise ValueError(f'The image is larger than {MAX_UPLOAD // 1048576} MB')
+    return data
+
+
+def drive_files(kind, root):
+    """Images found at the link, as (id, path): the file itself, or the folder with its sub-folders."""
+    meta = drive_json(root, fields='id,name,mimeType')
+    if meta.get('mimeType') != DRIVE_FOLDER:
+        if kind == 'folder':
+            raise ValueError('This link is not a folder')
+        if meta.get('mimeType', '').startswith('image/') or IMAGE_NAME.search(meta.get('name', '')):
+            yield meta['id'], meta['name']
+        return
+    stack = [(root, '', 0)]
+    while stack:
+        folder, prefix, depth = stack.pop()
+        token = None
+        while True:
+            params = {'q': f"'{folder}' in parents and trashed=false", 'fields': 'nextPageToken,files(id,name,mimeType)', 'pageSize': 1000,
+                      'includeItemsFromAllDrives': 'true'}
+            if token:
+                params['pageToken'] = token
+            page = drive_json(None, **params)
+            for item in page.get('files', []):
+                if item.get('mimeType') == DRIVE_FOLDER:
+                    if depth < DRIVE_MAX_DEPTH:
+                        stack.append((item['id'], f"{prefix}{item['name']}/", depth + 1))
+                elif item.get('mimeType', '').startswith('image/') or IMAGE_NAME.search(item.get('name', '')):
+                    yield item['id'], f"{prefix}{item['name']}"
+            token = page.get('nextPageToken')
+            if not token:
+                break
+
+
+def import_status():
+    with IMPORT_LOCK:
+        return {**IMPORT, 'counts': dict(IMPORT['counts']), 'errors': list(IMPORT['errors']), 'configured': bool(GOOGLE_API_KEY)}
+
+
+def import_start(url, fandom, day, actor):
+    if not GOOGLE_API_KEY:
+        raise ValueError('Google Drive import is not set up: add GOOGLE_API_KEY to the server settings')
+    kind, root = drive_target(url)
+    fandom, day = clean(fandom, 80), proofs_day(day)
+    with storage.connection() as c:
+        profile = c.execute('SELECT name FROM collab_collabs WHERE name=?', (fandom,)).fetchone()
+    if not profile:
+        raise ValueError(f'"{fandom}" is not a defined collab')
+    fandom = profile['name']
+    with IMPORT_LOCK:
+        if IMPORT['running']:
+            raise ValueError('A Drive import is already running: wait for it or stop it')
+        IMPORT.update(running=True, stopping=False, phase='listing', source=clean(url, 200), fandom=fandom, day=day, found=0, skipped=0, total=0, done=0,
+                      counts={}, failed=0, errors=[], error=None, started=time.time(), finished=0.0)
+
+    def note(error, name):
+        with IMPORT_LOCK:
+            IMPORT['failed'] += 1
+            IMPORT['errors'].append(f'{name}: {error}')
+            del IMPORT['errors'][:-8]
+
+    def run():
+        try:
+            found = []
+            for item in drive_files(kind, root):
+                if IMPORT['stopping']:
+                    return
+                found.append(item)
+                with IMPORT_LOCK:
+                    IMPORT['found'] = len(found)
+                if len(found) >= DRIVE_MAX_FILES:
+                    break
+            done_keys = set(known([f'drive:{i}' for i, _ in found]))
+            todo = [(i, p) for i, p in found if f'drive:{i}' not in done_keys]
+            with IMPORT_LOCK:
+                IMPORT.update(phase='checking', skipped=len(found) - len(todo), total=len(todo))
+            queue = iter(todo)
+            queue_lock = threading.Lock()
+
+            def lane():
+                while not IMPORT['stopping']:
+                    with queue_lock:
+                        item = next(queue, None)
+                    if item is None:
+                        return
+                    file_id, path = item
+                    try:
+                        result = process(fandom, path, f'drive:{file_id}', drive_bytes(file_id), actor, day)
+                        with IMPORT_LOCK:
+                            IMPORT['counts'][result['status']] = IMPORT['counts'].get(result['status'], 0) + 1
+                    except (ValueError, DriveError) as error:
+                        note(error, path)
+                    except Exception as error:
+                        logging.exception('Drive import of %s failed', path)
+                        note(error or 'Unexpected error', path)
+                    with IMPORT_LOCK:
+                        IMPORT['done'] += 1
+            workers = [threading.Thread(target=lane, daemon=True) for _ in range(DRIVE_LANES)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+        except (DriveError, ValueError) as error:
+            with IMPORT_LOCK:
+                IMPORT['error'] = str(error)
+        except Exception as error:
+            logging.exception('Drive import failed')
+            with IMPORT_LOCK:
+                IMPORT['error'] = str(error) or 'Unexpected error'
+        finally:
+            with IMPORT_LOCK:
+                IMPORT.update(running=False, phase='stopped' if IMPORT['stopping'] else 'done', finished=time.time())
+
+    threading.Thread(target=run, daemon=True, name='collab-drive-import').start()
+    return import_status()
+
+
+def import_stop():
+    with IMPORT_LOCK:
+        if IMPORT['running']:
+            IMPORT['stopping'] = True
+    return import_status()
+
+
 # ---------------------------------------------------------------- HTTP glue (called from app.py)
 def get(path, query):
     """Returns (status, body, content_type) for authenticated GET requests, or None if not a collab route."""
@@ -1067,6 +1270,8 @@ def get(path, query):
         return 200, queue(offset, min(50, max(1, int((query.get('limit') or ['10'])[0]))), kind), 'application/json; charset=utf-8'
     if path == '/api/collab/reprocess':
         return 200, reprocess_status(), 'application/json; charset=utf-8'
+    if path == '/api/collab/import':
+        return 200, import_status(), 'application/json; charset=utf-8'
     if path == '/api/collab/export.csv':
         kind = 'full' if (query.get('kind') or [''])[0] == 'full' else 'summary'
         day = clean((query.get('day') or [''])[0], 10)
@@ -1106,6 +1311,10 @@ def mutate(path, payload, actor):
         if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys) or len(keys) > 2000:
             raise ValueError('keys must be a list of at most 2000 strings')
         return {'known': known(keys)}
+    if path == '/api/collab/import/start':
+        return import_start(payload.get('url', ''), payload.get('fandom', ''), payload.get('day'), actor)
+    if path == '/api/collab/import/stop':
+        return import_stop()
     if path == '/api/collab/reprocess/start':
         return reprocess_start(payload.get('kind') or 'all')
     match = re.fullmatch(r'/api/collab/proofs/(\d+)/(approve|reject|keep|read)', path)

@@ -5,6 +5,7 @@ import random
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -271,6 +272,89 @@ class Partners(Base):
         self.assertEqual(listed['Lingshot']['slots'], [0])
         self.assertEqual(len(listed['Lingshot']['refs']), 1)
 
+
+
+
+class DriveImport(Base):
+    FOLDER = 'application/vnd.google-apps.folder'
+
+    def fake_drive(self, tree):
+        """tree: {folder id: [(id, name, mime)]}; names of the files are looked up by id."""
+        def drive_json(file_id=None, **params):
+            if file_id:
+                return {'id': file_id, 'name': 'root', 'mimeType': self.FOLDER if file_id in tree else 'image/png'}
+            folder = params['q'].split("'")[1]
+            return {'files': [{'id': i, 'name': n, 'mimeType': m} for i, n, m in tree[folder]]}
+        return drive_json
+
+    def wait(self):
+        for _ in range(500):
+            if not collab.import_status()['running']:
+                return collab.import_status()
+            time.sleep(0.02)
+        self.fail('import did not finish')
+
+    def test_links_are_understood(self):
+        self.assertEqual(collab.drive_target('https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp?usp=sharing'), ('folder', '1AbCdEfGhIjKlMnOp'))
+        self.assertEqual(collab.drive_target('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view'), ('file', '1AbCdEfGhIjKlMnOp'))
+        self.assertEqual(collab.drive_target('https://drive.google.com/open?id=1AbCdEfGhIjKlMnOp'), ('any', '1AbCdEfGhIjKlMnOp'))
+        for bad in ('https://evil.example/drive/folders/1AbCdEfGhIjKlMnOp', 'https://drive.google.com/', 'ftp://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp', 'x'):
+            with self.assertRaises(ValueError):
+                collab.drive_target(bad)
+
+    def test_folder_with_subfolders_is_imported_and_resumable(self):
+        tree = {'root0000000': [('f1', 'a.png', 'image/png'), ('sub00000000', 'day2', self.FOLDER), ('t1', 'notes.txt', 'text/plain')],
+                'sub00000000': [('f2', 'b.png', 'image/png'), ('f3', 'c.jpg', 'application/octet-stream')]}
+        photos = {'f1': certificate(1, extra=1), 'f2': certificate(1, extra=2), 'f3': certificate(1, extra=3)}
+        ids = iter(('1234567890ABCDEF', 'QWERTYUIOPLKJHGF', 'ZXCVBNMPOIUYTRE9'))
+        with patch.object(collab, 'GOOGLE_API_KEY', 'k'), patch.object(collab, 'drive_json', self.fake_drive(tree)), \
+                patch.object(collab, 'drive_bytes', lambda i: photos[i]), patch.object(collab, 'ocr_ids', side_effect=lambda im: (next(ids),) * 2):
+            collab.import_start('https://drive.google.com/drive/folders/root0000000', 'Fandom A', '2026-11-05', 'admin')
+            job = self.wait()
+            self.assertEqual((job['error'], job['total'], job['done'], job['counts'].get('valid'), job['failed']), (None, 3, 3, 3, 0))
+            rows = collab.summary()['submissions']
+            self.assertEqual([(r['fandom'], r['day'], r['valid']) for r in rows], [('Fandom A', '2026-11-05', 3)])
+            with storage.connection() as c:
+                names = {r[0] for r in c.execute('SELECT file_name FROM collab_proofs')}
+            self.assertEqual(names, {'a.png', 'day2/b.png', 'day2/c.jpg'})
+            collab.import_start('https://drive.google.com/drive/folders/root0000000', 'Fandom A', '2026-11-05', 'admin')   # same link again
+            job = self.wait()
+            self.assertEqual((job['skipped'], job['total']), (3, 0))
+
+    def test_errors_are_reported_per_file_and_setup_is_checked(self):
+        with patch.object(collab, 'GOOGLE_API_KEY', ''):
+            with self.assertRaises(ValueError):
+                collab.import_start('https://drive.google.com/drive/folders/root0000000', 'Fandom A', '2026-11-05', 'admin')
+        tree = {'root0000000': [('f1', 'a.png', 'image/png'), ('f2', 'b.png', 'image/png')]}
+        def photo(i):
+            if i == 'f2':
+                raise collab.DriveError('Google is limiting the downloads right now', retry=True)
+            return certificate(1, extra=1)
+        with patch.object(collab, 'GOOGLE_API_KEY', 'k'), patch.object(collab, 'drive_json', self.fake_drive(tree)), patch.object(collab, 'drive_bytes', photo), \
+                patch.object(collab, 'ocr_ids', return_value=('AAAAAAAAAAAAAAAA',) * 2):
+            with self.assertRaises(ValueError):
+                collab.import_start('https://drive.google.com/drive/folders/root0000000', 'Nobody', '2026-11-05', 'admin')
+            collab.import_start('https://drive.google.com/drive/folders/root0000000', 'Fandom A', '2026-11-05', 'admin')
+            job = self.wait()
+        self.assertEqual((job['done'], job['failed'], job['counts'].get('valid')), (2, 1, 1))
+        self.assertIn('b.png: Google is limiting', job['errors'][0])
+
+    def test_google_errors_become_readable_messages(self):
+        def failing(code, body=b''):
+            error = collab.urllib.error.HTTPError('u', code, 'x', {}, io.BytesIO(body))
+            return patch.object(collab.urllib.request, 'urlopen', side_effect=error)
+        with failing(404):
+            with self.assertRaises(collab.DriveError) as caught:
+                collab.drive_open('https://www.googleapis.com/x')
+        self.assertIn('shared', str(caught.exception))
+        with failing(403, b'{"error":{"errors":[{"reason":"accessNotConfigured"}]}}'):
+            with self.assertRaises(collab.DriveError) as caught:
+                collab.drive_open('https://www.googleapis.com/x')
+        self.assertIn('not enabled', str(caught.exception))
+        with failing(403, b'{"error":{"errors":[{"reason":"downloadQuotaExceeded"}]}}'):
+            with self.assertRaises(collab.DriveError) as caught:
+                collab.drive_open('https://www.googleapis.com/x')
+        self.assertTrue(caught.exception.retry)
 
 
 class ReportLinks(Base):

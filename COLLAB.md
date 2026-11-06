@@ -68,3 +68,13 @@ Teams send their folder to the organiser, who uploads it. In the **Recap** table
 - The page is not indexed by search engines and sends no referrer. Treat the link like a password: anyone who has it can review that batch.
 
 The Recap table has one row per verification run (collab + proofs date). Each row has **Card** (the share image: collab name, valid proofs and the run date), **Stats CSV** (the run's counts), **Report CSV** (the result of every file of the run) and the report link. Uploading more files for the same collab and date adds them to the same run.
+
+## Importing from Google Drive
+
+In **Upload**, under the folder pickers, paste a Google Drive link and press **Import from Drive**. The server lists the images of the folder (sub-folders included) or reads the single image, downloads them itself and checks them like any upload, using the collab and the proofs date chosen above. Nothing is downloaded on your device, and you can close the page: the progress is there when you come back.
+
+- Needs `GOOGLE_API_KEY` in `.env` (a Google Cloud key with the Drive API enabled, restricted to it); restart the container after adding it. Without it the form says it is not set up.
+- The folder or file must be shared as "Anyone with the link". Private ones answer "not found or not shared".
+- Files are remembered by their Drive ID: after a stop or a failure, import the same link again and the finished files are skipped. Files that failed are tried again.
+- One import runs at a time; three files are handled together and the OCR limit (`COLLAB_WORKERS`) still applies. Images over the upload limit (`COLLAB_MAX_UPLOAD_MB`) are reported as failed. Google may slow down downloads of the same file; the server waits and tries again a few times.
+- A restart of the server stops a running import: import the same link again to continue.

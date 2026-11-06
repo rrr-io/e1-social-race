@@ -71,6 +71,21 @@
         </div>
         <div class="form-actions"><button id="start" type="submit">Start verification</button><button id="stop" type="button" class="btn-ghost" hidden>Stop</button></div>
       </form>
+      <form id="drive-form">
+        <h3>Or a Google Drive link</h3>
+        <p class="section-note">The server reads the folder (sub-folders included) or the image itself, so nothing is downloaded on your device. The link must be shared as “Anyone with the link”. It uses the collab and date chosen above. Run it again with the same link to continue after a stop: files already processed are skipped.</p>
+        <p id="drive-off" class="section-note" hidden>Not set up yet: add <code>GOOGLE_API_KEY</code> to the server settings and restart.</p>
+        <div class="add-row">
+          <label class="grow">Drive link<input id="drive-url" type="url" inputmode="url" maxlength="500" autocomplete="off" placeholder="https://drive.google.com/drive/folders/…"></label>
+          <button id="drive-start" type="submit">Import from Drive</button><button id="drive-stop" type="button" class="btn-ghost" hidden>Stop</button>
+        </div>
+      </form>
+      <div id="drive-run" hidden>
+        <div class="bar" role="progressbar" aria-label="Drive import progress" aria-valuemin="0" aria-valuemax="100" id="drive-bar"><span id="drive-fill"></span></div>
+        <p id="drive-text" class="run-text" aria-live="polite"></p>
+        <p id="drive-chips" class="chips"></p>
+        <ul id="drive-errors" class="run-errors"></ul>
+      </div>
       <div id="run" hidden>
         <div class="bar" role="progressbar" aria-label="Verification progress" aria-valuemin="0" aria-valuemax="100" id="run-bar"><span id="run-fill"></span></div>
         <p id="run-text" class="run-text" aria-live="polite"></p>
