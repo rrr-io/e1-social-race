@@ -339,6 +339,39 @@ class DriveImport(Base):
         self.assertEqual((job['done'], job['failed'], job['counts'].get('valid')), (2, 1, 1))
         self.assertIn('b.png: Google is limiting', job['errors'][0])
 
+    def test_throttling_in_the_middle_is_retried_and_pauses_the_import(self):
+        throttled = collab.urllib.error.HTTPError('u', 404, 'x', {}, io.BytesIO(b'{"error":{"message":"File not found"}}'))
+        calls = []
+        def flaky(request, timeout=0):
+            calls.append(1)
+            if len(calls) < 3:
+                raise throttled
+            class Ok:
+                def __enter__(s): return s
+                def __exit__(s, *a): return False
+                def read(s, n=None): return b'data'
+            return Ok()
+        with patch.object(collab.urllib.request, 'urlopen', flaky), patch.object(collab.time, 'sleep'), patch.object(collab, 'DRIVE_PACE', 0):
+            self.assertEqual(collab.drive_call('https://www.googleapis.com/x', soft=True), b'data')     # a download refused twice then served
+            self.assertEqual(len(calls), 3)
+        with patch.object(collab.urllib.request, 'urlopen', side_effect=throttled), patch.object(collab.time, 'sleep'), patch.object(collab, 'DRIVE_PACE', 0):
+            with self.assertRaises(collab.DriveError) as caught:
+                collab.drive_call('https://www.googleapis.com/x', soft=True)
+        self.assertIn('limiting downloads', str(caught.exception))
+        self.assertNotIn('not shared', str(caught.exception))
+        with patch.object(collab.urllib.request, 'urlopen', side_effect=throttled), patch.object(collab.time, 'sleep'), patch.object(collab, 'DRIVE_PACE', 0):
+            with self.assertRaises(collab.DriveError) as caught:                                     # at the start it still means "not shared"
+                collab.drive_call('https://www.googleapis.com/x')
+        self.assertIn('not shared', str(caught.exception))
+        tree = {'root0000000': [(f'f{i}', f'{i}.png', 'image/png') for i in range(8)]}
+        def refused(i):
+            raise collab.DriveError('Google refused this download (HTTP 404); it is most likely limiting downloads', retry=True)
+        with patch.object(collab, 'GOOGLE_API_KEY', 'k'), patch.object(collab, 'drive_json', self.fake_drive(tree)), patch.object(collab, 'drive_bytes', refused):
+            collab.import_start('https://drive.google.com/drive/folders/root0000000', 'Fandom A', '2026-11-05', 'admin')
+            job = self.wait()
+        self.assertIn('paused', job['error'])
+        self.assertLess(job['done'], 8)
+
     def test_google_errors_become_readable_messages(self):
         def failing(code, body=b''):
             error = collab.urllib.error.HTTPError('u', code, 'x', {}, io.BytesIO(body))
@@ -355,6 +388,36 @@ class DriveImport(Base):
             with self.assertRaises(collab.DriveError) as caught:
                 collab.drive_open('https://www.googleapis.com/x')
         self.assertTrue(caught.exception.retry)
+
+
+
+class DeleteRun(Base):
+    def test_a_wrong_run_is_removed_without_harming_the_certificates(self):
+        wrong = self.send(certificate(1, extra=1), 'w1', ids=('1234567890ABCDEF',) * 2, fandom='Fandom A')
+        self.send(certificate(1, extra=2), 'w2', ids=('QWERTYUIOPLKJHGF',) * 2, fandom='Fandom A')
+        again = self.send(certificate(1, extra=1), 'r1', ids=('1234567890ABCDEF',) * 2, fandom='Fandom B')   # same certificate sent to the right collab too
+        self.assertEqual((wrong['status'], again['status']), ('valid', 'duplicate'))
+        runs = {r['fandom']: r['id'] for r in collab.summary()['submissions']}
+        collab.share_create(runs['Fandom A'])
+        result = collab.delete_run(runs['Fandom A'], 'admin')
+        self.assertEqual((result['files'], result['freed'], result['promoted']), (2, 1, 1))
+        rows = collab.summary()['submissions']
+        self.assertEqual([(r['fandom'], r['valid'], r['duplicate']) for r in rows], [('Fandom B', 1, 0)])     # the certificate now counts for the right collab
+        with storage.connection() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM collab_shares').fetchone()[0], 0)
+        self.assertEqual(self.send(certificate(1, extra=2), 'w2', ids=('QWERTYUIOPLKJHGF',) * 2, fandom='Fandom B')['status'], 'valid')   # the freed ID and the same file key work again
+        with self.assertRaises(ValueError):
+            collab.delete_run(runs['Fandom A'], 'admin')
+
+    def test_nothing_is_left_behind_and_running_imports_block_it(self):
+        self.send(certificate(1, extra=1), 'w1', ids=('1234567890ABCDEF',) * 2, fandom='Fandom A')
+        run = collab.summary()['submissions'][0]
+        with patch.dict(collab.IMPORT, {'running': True, 'fandom': 'Fandom A', 'day': run['day']}):
+            with self.assertRaises(ValueError):
+                collab.delete_run(run['id'], 'admin')
+        collab.delete_run(run['id'], 'admin')
+        with storage.connection() as c:
+            self.assertEqual([c.execute(f'SELECT count(*) FROM {t}').fetchone()[0] for t in ('collab_proofs', 'collab_submissions', 'collab_mask')], [0, 0, 0])
 
 
 class ReportLinks(Base):

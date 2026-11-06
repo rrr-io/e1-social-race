@@ -93,7 +93,17 @@ function runCell(s) {
   const card = el('button', 'btn-ghost', 'Card'); card.type = 'button';
   card.setAttribute('aria-label', `Download the share card of ${s.fandom}, ${s.day}`);
   card.addEventListener('click', () => downloadCard(s, card));
-  td.append(card, ' ', csv('Stats CSV', 'stats'), ' ', csv('Report CSV', 'full'), ' ', shareCell(s));
+  const remove = el('button', 'btn-ghost danger', 'Delete run'); remove.type = 'button';
+  remove.addEventListener('click', async () => {
+    if (!confirm(`Delete the run of ${s.fandom} dated ${s.day}?\n\nAll its ${fmt(s.files)} files (${fmt(s.valid)} valid) are removed as if they had never been uploaded: their IDs are free again and the files can be uploaded again, also for another collab. This cannot be undone.`)) return;
+    remove.disabled = true;
+    try {
+      const r = await request(`/api/collab/submissions/${s.id}/delete`, {});
+      toast('success', 'Run deleted', `${fmt(r.files)} files removed${r.promoted ? `; ${fmt(r.promoted)} duplicate${r.promoted === 1 ? '' : 's'} counted instead` : ''}.`);
+      offset = 0; await Promise.all([loadSummary(), loadQueue()]);
+    } catch (e) { fail(e); remove.disabled = false; }
+  });
+  td.append(card, ' ', csv('Stats CSV', 'stats'), ' ', csv('Report CSV', 'full'), ' ', shareCell(s), ' ', remove);
   return td;
 }
 function shareCell(s) {

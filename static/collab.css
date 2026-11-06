@@ -112,3 +112,4 @@ tr.total td{font-weight:700;border-top:2px solid var(--line-strong)}
 .run-actions{white-space:normal!important;min-width:0;width:230px}
 .run-actions button{display:inline-block}
 #drive-form{margin-top:16px}
+.run-actions .danger{color:var(--err);border-color:var(--err)}

@@ -951,6 +951,39 @@ def report_post(path, payload):
     return report_act(match[1], int(match[2]), match[3], payload)
 
 
+def delete_run(submission_id, actor):
+    """Removes a whole verification run (collab + proofs date), e.g. one started for the wrong collab.
+
+    Its proofs disappear as if never uploaded: the IDs it had counted are free again, its files can be uploaded or
+    imported again (also for another collab), and its report link stops working. A proof of another run that had been
+    set aside as a duplicate of one of those IDs becomes the counted one, so nothing else is lost.
+    """
+    with storage.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        run = c.execute('SELECT id,fandom,day FROM collab_submissions WHERE id=?', (submission_id,)).fetchone()
+        if not run:
+            raise ValueError('Run not found')
+        with IMPORT_LOCK:
+            if IMPORT['running'] and (IMPORT['fandom'], IMPORT['day']) == (run['fandom'], run['day']):
+                raise ValueError('A Drive import is running for this run: stop it first')
+        counted = [r[0] for r in c.execute("SELECT cert_id FROM collab_proofs WHERE submission_id=? AND status='valid' AND cert_id IS NOT NULL", (submission_id,))]
+        files = c.execute('SELECT count(*) FROM collab_proofs WHERE submission_id=?', (submission_id,)).fetchone()[0]
+        c.execute('DELETE FROM collab_proofs WHERE submission_id=?', (submission_id,))
+        c.execute('DELETE FROM collab_shares WHERE submission_id=?', (submission_id,))
+        c.execute('DELETE FROM collab_submissions WHERE id=?', (submission_id,))
+        promoted = 0
+        for cert_id in counted:
+            c.execute('DELETE FROM collab_mask WHERE cert_id=?', (cert_id,))
+            heir = c.execute("SELECT id FROM collab_proofs WHERE cert_id=? AND status='duplicate' ORDER BY id LIMIT 1", (cert_id,)).fetchone()
+            if heir:
+                c.execute("UPDATE collab_proofs SET status='valid',reason='Counted after an earlier run was removed',reviewed_by=?,reviewed_at=? WHERE id=?",
+                          (actor, time.time(), heir['id']))
+                add_mask(c, cert_id)
+                promoted += 1
+    logging.info('Run %s %s removed by %s: %d files, %d IDs freed, %d duplicates promoted', run['fandom'], run['day'], actor, files, len(counted), promoted)
+    return {'ok': True, 'files': files, 'freed': len(counted) - promoted, 'promoted': promoted}
+
+
 def retry_where(kind):
     """The review proofs a new check can change, from their stored preview. 'all' is every list at once."""
     if kind != 'all' and kind not in RETRY_KINDS:
@@ -1067,13 +1100,13 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '').strip()
 DRIVE_API = 'https://www.googleapis.com/drive/v3/files'
 DRIVE_ID = r'[A-Za-z0-9_-]{10,100}'
 DRIVE_FOLDER = 'application/vnd.google-apps.folder'
-DRIVE_LANES = 3          # files downloaded and checked at the same time
+DRIVE_LANES = 2          # files downloaded and checked at the same time
 DRIVE_MAX_FILES = 60000
 DRIVE_MAX_DEPTH = 8
 IMAGE_NAME = re.compile(r'\.(png|jpe?g|webp|gif|bmp|heic|heif)$', re.I)
 IMPORT_LOCK = threading.Lock()
 IMPORT = {'running': False, 'stopping': False, 'phase': '', 'source': '', 'fandom': '', 'day': '', 'found': 0, 'skipped': 0, 'total': 0, 'done': 0,
-          'counts': {}, 'failed': 0, 'errors': [], 'error': None, 'started': 0.0, 'finished': 0.0}
+          'counts': {}, 'failed': 0, 'refused': 0, 'errors': [], 'error': None, 'started': 0.0, 'finished': 0.0}
 
 
 class DriveError(Exception):
@@ -1095,34 +1128,71 @@ def drive_target(url):
     raise ValueError('This does not look like a link to a Drive folder or file')
 
 
-def drive_open(url, limit=None):
-    """GET to the Drive API with the key; raises DriveError with a message people can act on."""
+DRIVE_PACE = max(0.0, float(os.getenv('GOOGLE_DRIVE_DELAY', '0.4')))   # seconds between requests to Google, shared by every lane
+DRIVE_WAITS = (5, 20, 60, 120)                                            # waits before each retry when Google is limiting
+DRIVE_GATE = threading.Lock()
+DRIVE_NEXT = [0.0]
+DRIVE_GIVE_UP = 5       # this many files in a row refused: stop and ask to try again later
+
+
+def drive_pace(cooldown=0.0):
+    """Spaces the requests out (Google throttles bursts) and, after a refusal, holds all lanes back for `cooldown` seconds."""
+    with DRIVE_GATE:
+        now = time.time()
+        if cooldown:
+            DRIVE_NEXT[0] = max(DRIVE_NEXT[0], now + cooldown)
+            return
+        wait = max(0.0, DRIVE_NEXT[0] - now)
+        DRIVE_NEXT[0] = max(now, DRIVE_NEXT[0]) + DRIVE_PACE
+    if wait:
+        time.sleep(wait)
+
+
+def drive_reason(body):
+    try:
+        error = json.loads(body)['error']
+        return (error.get('errors') or [{}])[0].get('reason') or error.get('message') or ''
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return ''
+
+
+def drive_open(url, limit=None, soft=False):
+    """GET to the Drive API with the key; raises DriveError with a message people can act on.
+
+    `soft`: a file download in the middle of an import. Google answers "not found" or "forbidden" there when it is
+    throttling, so these answers are treated as "try again later" and not as "this is not shared".
+    """
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={'Accept': 'application/json'}), timeout=60) as response:
             return response.read(limit) if limit else response.read()
     except urllib.error.HTTPError as error:
         body = error.read(2000).decode('utf-8', 'ignore')
+        reason = drive_reason(body)
+        detail = f'HTTP {error.code}' + (f', {reason}' if reason else '')
         if error.code in (429, 500, 502, 503, 504) or 'ateLimit' in body or 'uotaExceeded' in body:
-            raise DriveError('Google is limiting the downloads right now', retry=True)
+            raise DriveError(f'Google is limiting the downloads right now ({detail})', retry=True)
         if error.code == 400 and 'API key' in body:
             raise DriveError('The Google API key is not valid: check GOOGLE_API_KEY')
         if error.code == 403 and ('accessNotConfigured' in body or 'has not been used' in body or 'SERVICE_DISABLED' in body):
             raise DriveError('The Drive API is not enabled for this API key: enable it in Google Cloud')
         if error.code in (401, 403, 404):
-            raise DriveError('Google Drive says this is not found or not shared. Set it to "Anyone with the link can view".')
-        raise DriveError(f'Google Drive answered HTTP {error.code}')
+            if soft:
+                raise DriveError(f'Google refused this download ({detail}); it is most likely limiting downloads', retry=True)
+            raise DriveError(f'Google Drive says this is not found or not shared ({detail}). Set it to "Anyone with the link can view".')
+        raise DriveError(f'Google Drive answered {detail}')
     except (urllib.error.URLError, TimeoutError, OSError):
         raise DriveError('Could not reach Google Drive', retry=True)
 
 
-def drive_call(url, limit=None):
-    for attempt in range(4):
+def drive_call(url, limit=None, soft=False):
+    for attempt in range(len(DRIVE_WAITS) + 1):
+        drive_pace()
         try:
-            return drive_open(url, limit)
+            return drive_open(url, limit, soft)
         except DriveError as error:
-            if not error.retry or attempt == 3:
+            if not error.retry or attempt == len(DRIVE_WAITS):
                 raise
-            time.sleep(1.5 * (attempt + 1))
+            drive_pace(DRIVE_WAITS[attempt])   # every lane waits, not only this one
 
 
 def drive_json(file_id=None, **params):
@@ -1133,7 +1203,7 @@ def drive_json(file_id=None, **params):
 
 def drive_bytes(file_id):
     query = urlencode({'alt': 'media', 'key': GOOGLE_API_KEY, 'supportsAllDrives': 'true'})
-    data = drive_call(f'{DRIVE_API}/{file_id}?{query}', MAX_UPLOAD + 1)
+    data = drive_call(f'{DRIVE_API}/{file_id}?{query}', MAX_UPLOAD + 1, soft=True)
     if len(data) > MAX_UPLOAD:
         raise ValueError(f'The image is larger than {MAX_UPLOAD // 1048576} MB')
     return data
@@ -1188,7 +1258,7 @@ def import_start(url, fandom, day, actor):
         if IMPORT['running']:
             raise ValueError('A Drive import is already running: wait for it or stop it')
         IMPORT.update(running=True, stopping=False, phase='listing', source=clean(url, 200), fandom=fandom, day=day, found=0, skipped=0, total=0, done=0,
-                      counts={}, failed=0, errors=[], error=None, started=time.time(), finished=0.0)
+                      counts={}, failed=0, refused=0, errors=[], error=None, started=time.time(), finished=0.0)
 
     def note(error, name):
         with IMPORT_LOCK:
@@ -1225,7 +1295,15 @@ def import_start(url, fandom, day, actor):
                         result = process(fandom, path, f'drive:{file_id}', drive_bytes(file_id), actor, day)
                         with IMPORT_LOCK:
                             IMPORT['counts'][result['status']] = IMPORT['counts'].get(result['status'], 0) + 1
-                    except (ValueError, DriveError) as error:
+                            IMPORT['refused'] = 0
+                    except DriveError as error:
+                        note(error, path)
+                        with IMPORT_LOCK:
+                            IMPORT['refused'] += 1
+                            if IMPORT['refused'] >= DRIVE_GIVE_UP and not IMPORT['stopping']:
+                                IMPORT['stopping'] = True
+                                IMPORT['error'] = 'Google keeps refusing the downloads, so the import was paused. Wait a while (10 minutes or more) and import the same link again: finished files are skipped.'
+                    except ValueError as error:
                         note(error, path)
                     except Exception as error:
                         logging.exception('Drive import of %s failed', path)
@@ -1326,6 +1404,9 @@ def mutate(path, payload, actor):
         if match[2] == 'read':
             return read_proof_id(int(match[1]))
         return reject(int(match[1]), actor)
+    match = re.fullmatch(r'/api/collab/submissions/(\d+)/delete', path)
+    if match:
+        return delete_run(int(match[1]), actor)
     match = re.fullmatch(r'/api/collab/submissions/(\d+)/(share|share/renew|share/revoke)', path)
     if match:
         if match[2] == 'share/revoke':
