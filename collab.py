@@ -26,6 +26,13 @@ from urllib.parse import urlencode, urlsplit
 
 from PIL import Image, ImageOps
 
+try:  # iPhone photos and screenshots can be HEIC/HEIF: readable when pillow-heif is installed (it is in the Docker image)
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HEIF = True
+except ImportError:
+    HEIF = False
+
 import storage
 
 try:
