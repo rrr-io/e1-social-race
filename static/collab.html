@@ -71,6 +71,7 @@
         </div>
         <div class="form-actions"><button id="start" type="submit">Start verification</button><button id="stop" type="button" class="btn-ghost" hidden>Stop</button></div>
       </form>
+      <p id="heic-off" class="section-note" hidden><strong>HEIC photos are not supported by this server yet</strong>: the package that reads them is missing from the running image. Redeploy so the image is rebuilt (the deploy installs <code>pillow-heif</code>).</p>
       <form id="drive-form">
         <h3>Or a Google Drive link</h3>
         <p class="section-note">The server reads the folder (sub-folders included) or the image itself, so nothing is downloaded on your device. The link must be shared as “Anyone with the link”. It uses the collab and date chosen above. Run it again with the same link to continue after a stop: files already processed are skipped.</p>

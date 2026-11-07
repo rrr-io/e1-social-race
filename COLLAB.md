@@ -86,3 +86,7 @@ If a run was started for the wrong collab, press **Delete run** on its row in th
 ## The same file sent twice
 
 A file with the same name and the same content as one already in the run (for example a folder uploaded again after a Drive import, or the other way round) is recognised as a repeat: it is not recorded again and does not add a duplicate. A file with another name but the same content is still a duplicate. Runs recorded by older versions may show such repeats as duplicates: the Recap row then has **Remove N repeats**, which deletes only those; valid proofs are never touched.
+
+## When a file cannot be opened
+
+The reason of a file that could not be opened now says why, in brackets (for example `Cannot open the image (UnidentifiedImageError: …)`). HEIC photos are decoded one at a time because they use a lot of memory; the container memory limit is 1 GB (`mem_limit` in `deploy/compose.production.yaml`). If the server was started without the HEIC package, Upload shows a notice and these files say so: redeploy to rebuild the image.

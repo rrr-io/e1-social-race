@@ -144,10 +144,29 @@ def reset_proofs():
 UNREADABLE = 'Cannot open the image'
 
 
+HEIF_LOCK = threading.Lock()   # a HEIC photo takes a lot of memory to decode: one at a time keeps the small server from running out
+OPEN_STATE = threading.local()
+
+
+def is_heif(data):
+    return data[4:8] == b'ftyp' and data[8:12] in (b'heic', b'heix', b'hevc', b'hevx', b'heim', b'heis', b'mif1', b'msf1')
+
+
 def open_image(data):
+    """The image as RGB, or None; why it failed is kept in OPEN_STATE.error (read by `unreadable_reason`)."""
+    OPEN_STATE.error = ''
+    heif = is_heif(data)
+    if heif and not HEIF:
+        OPEN_STATE.error = 'HEIC photo, but this server cannot read HEIC yet: the image must be rebuilt with pillow-heif'
+        return None
     try:
-        im = Image.open(io.BytesIO(data))
-        im.load()
+        if heif:
+            with HEIF_LOCK:
+                im = Image.open(io.BytesIO(data))
+                im.load()
+        else:
+            im = Image.open(io.BytesIO(data))
+            im.load()
         im = ImageOps.exif_transpose(im)
         if im.mode in ('RGBA', 'LA', 'P'):
             im = im.convert('RGBA')
@@ -155,8 +174,18 @@ def open_image(data):
             flat.paste(im, mask=im.getchannel('A'))
             return flat
         return im.convert('RGB')
-    except Exception:
+    except MemoryError:
+        OPEN_STATE.error = 'the server ran out of memory opening it'
         return None
+    except Exception as error:
+        OPEN_STATE.error = f"{'HEIC photo' if heif else error.__class__.__name__}: {str(error)[:100]}" if heif else f'{error.__class__.__name__}: {str(error)[:100]}'
+        logging.warning('Cannot open an image (%d bytes, %s): %s', len(data), 'HEIC' if heif else 'other', error)
+        return None
+
+
+def unreadable_reason():
+    detail = getattr(OPEN_STATE, 'error', '')
+    return f'{UNREADABLE} ({detail})' if detail else UNREADABLE
 
 
 def crop(im, box):
@@ -519,7 +548,7 @@ def analyse(data, refs, partner=None):
     """
     im = open_image(data)
     if im is None:
-        return 'manual', UNREADABLE, None, None, None
+        return 'manual', unreadable_reason(), None, None, None
     im, screenshot = normalise(im)  # a phone screenshot is reduced to the certificate card
     shifts = SHOT_SHIFTS if screenshot else NO_SHIFT
 
@@ -579,7 +608,7 @@ def process(fandom, file_name, file_key, data, actor, day=None):
     sha = hashlib.sha256(data).hexdigest()
     with storage.connection() as c:
         again = existing(c, file_key)
-        if again and again['status'] == 'manual' and again['reason'] == UNREADABLE and open_image(data) is not None:
+        if again and again['status'] == 'manual' and again['reason'].startswith(UNREADABLE) and open_image(data) is not None:
             c.execute('DELETE FROM collab_proofs WHERE id=?', (again['id'],))   # it could not be opened before (e.g. HEIC) and now it can: check it for real
             again = None
         profile = c.execute('SELECT id,name,slots FROM collab_collabs WHERE name=?', (fandom,)).fetchone()
@@ -699,7 +728,7 @@ def summary():
         for item in collabs:
             item['slots'] = json.loads(item['slots'])
             item['refs'] = [dict(r) for r in c.execute('SELECT id,label FROM collab_refs WHERE collab_id=? ORDER BY id', (item['id'],))]
-    return {'submissions': rows, 'refs': refs, 'collabs': collabs, 'ocr_available': bool(TESSERACT), 'max_upload_mb': MAX_UPLOAD // 1048576}
+    return {'submissions': rows, 'refs': refs, 'collabs': collabs, 'ocr_available': bool(TESSERACT), 'heif': HEIF, 'max_upload_mb': MAX_UPLOAD // 1048576}
 
 
 # What each review list holds. The two "flagged" lists are proofs the system rejected on its own: a person
@@ -736,7 +765,7 @@ def known(keys):
         for i in range(0, len(keys), 500):
             chunk = [clean(k, 500) for k in keys[i:i + 500]]
             # files that could not be opened before are not "done": picking the folder again tries them again (e.g. after HEIC support)
-            found += [r[0] for r in c.execute(f"SELECT file_key FROM collab_proofs WHERE file_key IN ({','.join('?' * len(chunk))}) AND NOT (status='manual' AND reason=?)", chunk + [UNREADABLE])]
+            found += [r[0] for r in c.execute(f"SELECT file_key FROM collab_proofs WHERE file_key IN ({','.join('?' * len(chunk))}) AND NOT (status='manual' AND reason LIKE ?)", chunk + [UNREADABLE + '%'])]
     return found
 
 

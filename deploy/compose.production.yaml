@@ -26,7 +26,7 @@ services:
         aliases: [e1-social-pulse]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    mem_limit: 512m
+    mem_limit: 1g
     healthcheck:
       test: [CMD, python, /app/deploy/healthcheck.py]
       interval: 15s

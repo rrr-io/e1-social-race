@@ -69,6 +69,7 @@ const refreshFiles = bindPicker($('#files'), $('#files-note'), 'No images select
 async function loadSummary() {
   data = await request('/api/collab/summary');
   $('#ocr-banner').hidden = data.ocr_available;
+  $('#heic-off').hidden = data.heif !== false;
   renderRefs(data.refs);
   renderCollabs(data.collabs);
   renderRecap();

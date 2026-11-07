@@ -451,6 +451,32 @@ class Repeats(Base):
         self.assertEqual((row['files'], row['valid'], row['duplicate'], row['repeats']), (2, 1, 1, 0))
 
 
+
+class OpenFailures(Base):
+    def test_unreadable_reason_says_why(self):
+        self.assertIsNone(collab.open_image(b'not an image at all'))
+        self.assertIn('UnidentifiedImageError', collab.unreadable_reason())
+        heic = b'\x00\x00\x00\x18ftypheic' + b'\x00' * 20
+        self.assertTrue(collab.is_heif(heic))
+        with patch.object(collab, 'HEIF', False):
+            self.assertIsNone(collab.open_image(heic))
+            self.assertIn('pillow-heif', collab.unreadable_reason())
+        self.assertFalse(collab.is_heif(b'\x89PNG\r\n\x1a\n' + b'\x00' * 20))
+        reason = None
+        result = collab.process('Fandom A', 'x.heic', 'kx', heic, 'admin')
+        self.assertTrue(result['reason'].startswith(collab.UNREADABLE))
+        self.assertEqual(collab.known(['kx']), [])   # still retried when sent again
+        self.assertTrue(collab.summary()['heif'] in (True, False))
+
+    @unittest.skipUnless(collab.HEIF, 'pillow-heif not installed')
+    def test_heic_certificate_is_read(self):
+        buffer = io.BytesIO()
+        Image.open(io.BytesIO(certificate(1, extra=1))).save(buffer, 'HEIF', quality=95)
+        with patch.object(collab, 'ocr_ids', return_value=('1234567890ABCDEF',) * 2):
+            result = collab.process('Fandom A', 'IMG_0001.HEIC', 'k-heic', buffer.getvalue(), 'admin')
+        self.assertEqual(result['status'], 'valid')
+
+
 class ReportLinks(Base):
     def setUp(self):
         super().setUp()
