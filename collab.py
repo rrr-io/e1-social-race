@@ -141,6 +141,9 @@ def reset_proofs():
 
 
 # ---------------------------------------------------------------- image analysis
+UNREADABLE = 'Cannot open the image'
+
+
 def open_image(data):
     try:
         im = Image.open(io.BytesIO(data))
@@ -516,7 +519,7 @@ def analyse(data, refs, partner=None):
     """
     im = open_image(data)
     if im is None:
-        return 'manual', 'Cannot open the image', None, None, None
+        return 'manual', UNREADABLE, None, None, None
     im, screenshot = normalise(im)  # a phone screenshot is reduced to the certificate card
     shifts = SHOT_SHIFTS if screenshot else NO_SHIFT
 
@@ -576,6 +579,9 @@ def process(fandom, file_name, file_key, data, actor, day=None):
     sha = hashlib.sha256(data).hexdigest()
     with storage.connection() as c:
         again = existing(c, file_key)
+        if again and again['status'] == 'manual' and again['reason'] == UNREADABLE and open_image(data) is not None:
+            c.execute('DELETE FROM collab_proofs WHERE id=?', (again['id'],))   # it could not be opened before (e.g. HEIC) and now it can: check it for real
+            again = None
         profile = c.execute('SELECT id,name,slots FROM collab_collabs WHERE name=?', (fandom,)).fetchone()
         if not profile:
             raise ValueError(f'"{fandom}" is not a defined collab. Add it in the Collabs section first.')
@@ -723,7 +729,8 @@ def known(keys):
     with storage.connection() as c:
         for i in range(0, len(keys), 500):
             chunk = [clean(k, 500) for k in keys[i:i + 500]]
-            found += [r[0] for r in c.execute(f"SELECT file_key FROM collab_proofs WHERE file_key IN ({','.join('?' * len(chunk))})", chunk)]
+            # files that could not be opened before are not "done": picking the folder again tries them again (e.g. after HEIC support)
+            found += [r[0] for r in c.execute(f"SELECT file_key FROM collab_proofs WHERE file_key IN ({','.join('?' * len(chunk))}) AND NOT (status='manual' AND reason=?)", chunk + [UNREADABLE])]
     return found
 
 
