@@ -21,9 +21,9 @@ import storage
 SLOT_BOXES = [(81, 443, 321, 683), (345, 443, 585, 683), (609, 443, 849, 683)]
 
 
-def certificate(last_seed=1, size=(930, 1410), text=None, extra=0, first_seed=10, second_seed=11):
+def certificate(last_seed=1, size=(930, 1410), text=None, extra=0, first_seed=10, second_seed=11, background=(240, 240, 255), text_y=0.91):
     """A synthetic certificate: three textured thumbnails, optionally an ID line."""
-    im = Image.new('RGB', size, (240, 240, 255))
+    im = Image.new('RGB', size, background)
     draw = ImageDraw.Draw(im)
     sx, sy = size[0] / 930, size[1] / 1410
     for seed, box in zip((first_seed, second_seed, last_seed), SLOT_BOXES):
@@ -37,7 +37,7 @@ def certificate(last_seed=1, size=(930, 1410), text=None, extra=0, first_seed=10
         draw.rectangle([5, 5, 5 + extra, 25], fill=(0, 0, 0))  # makes otherwise identical files differ
     if text:
         font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 30)
-        draw.text((0.14 * size[0], 0.91 * size[1]), text, fill=(90, 90, 100), font=font)
+        draw.text((0.14 * size[0], text_y * size[1]), text, fill=(90, 90, 100), font=font)
     out = io.BytesIO()
     im.save(out, 'PNG')
     return out.getvalue()
@@ -711,6 +711,14 @@ class Screenshots(Base):
         self.assertTrue(abs(y0 - 610) <= 4 and abs(x0 - 138) <= 4, (x0, y0, x1, y1))
         self.assertEqual(self.send(data, 'near-ad')['status'], 'valid')
 
+    def test_plain_white_card(self):
+        # some app versions draw the card without its tinted background: it is found from its three thumbnails
+        data = screenshot(certificate(1, background=(255, 255, 255)), colored_ad=True)
+        x0, y0, x1, y1 = collab.find_by_thumbnails(Image.open(io.BytesIO(data)))
+        self.assertTrue(abs(x0 - 134) <= 8 and abs(x1 - 946) <= 8 and abs(y0 - 643) <= 8, (x0, y0, x1, y1))
+        self.assertEqual(self.send(data, 'white')['status'], 'valid')
+        self.assertIsNone(collab.find_by_thumbnails(Image.new('RGB', (1080, 2280), (255, 255, 255))))
+
     def test_tiny_screenshot_goes_to_review_with_the_id_prefilled(self):
         result = self.send(screenshot(certificate(1), size=(240, 512), card_width=180, top=150, bare=True), 'tiny', ids=('1234567890ABCDEF',) * 2)
         self.assertEqual(result['status'], 'manual')
@@ -993,6 +1001,11 @@ class RealOCR(Base):
             result = collab.process('Fandom A', f'n{width}.png', f'n{width}', data, 'admin')
             self.assertEqual((result['status'], result['cert_id']), ('valid', '61105JDXSVKA6VXC'), width)
             collab.reset_proofs()
+
+    def test_finds_an_id_line_that_is_higher_than_usual(self):
+        data = screenshot(certificate(1, background=(255, 255, 255), text='No. 61106CPCGK3GMJVA', text_y=0.865), colored_ad=True)
+        result = collab.process('Fandom A', 'w.png', 'w', data, 'admin')
+        self.assertEqual((result['status'], result['cert_id']), ('valid', '61106CPCGK3GMJVA'))
 
     def test_reads_the_id_line_of_a_screenshot(self):
         result = collab.process('Fandom A', 'x.png', 'x', screenshot(certificate(1, text='61101HZSLUIHCBOR')), 'admin')

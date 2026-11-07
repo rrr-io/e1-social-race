@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 from urllib.parse import urlencode, urlsplit
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 try:  # iPhone photos and screenshots can be HEIC/HEIF: readable when pillow-heif is installed (it is in the Docker image)
     from pillow_heif import register_heif_opener
@@ -294,11 +294,62 @@ def find_card(im):
         for x0, x1 in runs([v / 255 for v in band.resize((w, 1), Image.BOX).tobytes()], 0.4, max(2, w // 60)):
             if x1 - x0 < w * 0.4 or abs((x1 - x0) / (y1 - y0) / RATIO - 1) > 0.04:
                 continue
+            inside = [v / 255 for v in mask.crop((x0, y0, x1, y1)).resize((1, y1 - y0), Image.BOX).tobytes()]
+            if max((b - a for a, b in runs([1 - v for v in inside], 0.9, 0)), default=0) > (y1 - y0) * 0.03:
+                continue   # a blank stretch inside: an ad banner and part of the card, not the card
             if best is None or (x1 - x0) * (y1 - y0) > best[0]:
                 best = ((x1 - x0) * (y1 - y0), (x0, y0, x1, y1))
     if not best:
         return None
     return tuple(round(v / scale) for v in best[1])
+
+
+def three_runs(values, w):
+    """The three thumbnail-wide stretches of a row or column profile, or None."""
+    found = [r for r in runs(values, 0.5, max(2, w // 80)) if r[1] - r[0] >= w * 0.12]
+    if len(found) != 3:
+        return None
+    widths = [b - a for a, b in found]
+    gaps = (found[1][0] - found[0][1], found[2][0] - found[1][1])
+    if max(widths) > min(widths) * 1.15 or min(gaps) <= 0 or max(gaps) > min(widths) * 0.25:
+        return None
+    return found
+
+
+def find_by_thumbnails(im):
+    """Box of the certificate (in the export frame) worked out from its row of three thumbnails, or None.
+
+    For screenshots where the card has no tinted background (some app versions draw it plain white),
+    so find_card() has nothing to go by. The box can reach outside the image.
+    """
+    scale = min(1.0, 540 / im.width)
+    small = im.convert('RGB').resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.BOX)
+    w, h = small.size
+    hsv = small.convert('HSV')
+    ink = ImageChops.lighter(hsv.getchannel('S').point(lambda v: 255 if v > 25 else 0), hsv.getchannel('V').point(lambda v: 255 if v < 215 else 0))
+    px = ink.load()
+    rows = [y for y in range(h) if three_runs([px[x, y] / 255 for x in range(w)], w)]
+    if not rows:
+        return None
+    # the longest stretch of such rows is the thumbnail row
+    bands, start = [], rows[0]
+    for a, b in zip(rows, rows[1:] + [None]):
+        if b is None or b - a > max(3, w // 40):
+            bands.append((start, a + 1))
+            start = b
+    y0, y1 = max(bands, key=lambda r: r[1] - r[0])
+    band = ink.crop((0, y0, w, y1)).resize((w, 1), Image.BOX)
+    cols = three_runs([v / 255 for v in band.tobytes()], w)
+    if not cols:
+        return None
+    left, right = cols[0][0], cols[2][1]
+    width = (right - left) / ((THUMB_SLOTS[2][2] - THUMB_SLOTS[0][0]))
+    if y1 - y0 < (cols[0][1] - cols[0][0]) * 0.4:   # not tall enough to be the thumbnails
+        return None
+    height = width / RATIO
+    x0 = left - THUMB_SLOTS[0][0] * width
+    top = (y0 + y1) / 2 - (THUMB_SLOTS[0][1] + THUMB_SLOTS[0][3]) / 2 * height
+    return tuple(round(v / scale) for v in (x0, top, x0 + width, top + height))
 
 
 def normalise(im):
@@ -307,7 +358,12 @@ def normalise(im):
         return im, False
     box = find_card(im)
     if not box:
-        return im, False
+        box = find_by_thumbnails(im)
+        if not box:
+            return im, False
+        page = Image.new(im.mode if im.mode in ('RGB', 'L') else 'RGB', (box[2] - box[0], box[3] - box[1]), 'white')
+        page.paste(im.convert(page.mode), (-box[0], -box[1]))   # white where the box reaches outside the image
+        return page, True
     x0, y0, x1, y1 = box
     height = y1 - y0
     top, bottom = max(0, round(y0 + SHOT_TOP * height)), min(im.height, round(y1 + SHOT_BOTTOM * height))
@@ -380,14 +436,39 @@ def tally(readings):
     return sorted(((f, votes[f]) for f in order), key=lambda x: -x[1])
 
 
-def read_ids(im):
+def id_line(im):
+    """Box of the last line of text in the bottom part of the card (the "No. <ID>" line), or None.
+
+    Used when the ID is not at the standard place: some app versions draw the card without its logo and
+    with other spacing, so the ID sits higher.
+    """
+    part = crop(im, (0.04, 0.80, 0.66, 0.99)).convert('L')
+    small = part.resize((max(1, part.width // 2), max(1, part.height)), Image.BOX).point(lambda v: 255 if v < 170 else 0)
+    rows = [v / 255 for v in small.resize((1, small.height), Image.BOX).tobytes()]
+    lines = [r for r in runs(rows, 0.02, 1) if r[1] - r[0] >= 4]
+    if not lines:
+        return None
+    y0, y1 = lines[-1]
+    pad = (y1 - y0) * 0.6
+    return (0.04, 0.80 + (y0 - pad) / im.height, 0.66, 0.80 + (y1 + pad) / im.height)
+
+
+def read_ids(im, box=ID_BOX):
     """Independent OCR readings of the "No. <ID>" line: different heights, plain and binarised.
 
     The wide box tolerates a few pixels of misalignment. Three readings are taken first; when they
-    all agree that is enough, otherwise up to five more are added.
+    all agree that is enough, otherwise up to five more are added. When nothing is read at the standard
+    place, the line is looked for.
     """
-    strip = crop(im, ID_BOX).convert('L')
+    readings = read_strip(crop(im, box).convert('L'))
+    if box == ID_BOX and not any(readings):
+        moved = id_line(im)
+        if moved and abs(moved[1] - ID_BOX[1]) > 0.01:
+            return read_ids(im, moved)
+    return readings
 
+
+def read_strip(strip):
     def variant(height, binarise=False):
         scale = min(8.0, max(1.0, height / strip.height))
         img = ImageOps.autocontrast(strip.resize((round(strip.width * scale), round(strip.height * scale)), Image.LANCZOS))
