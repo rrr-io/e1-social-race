@@ -477,6 +477,20 @@ class OpenFailures(Base):
         self.assertEqual(result['status'], 'valid')
 
 
+class UnreadableUnderAnOldKey(Base):
+    def test_folder_picked_again_replaces_an_unreadable_proof_saved_under_the_old_key(self):
+        data = certificate(1, extra=1)
+        with patch.object(collab, 'open_image', return_value=None):
+            first = collab.process('Fandom A', 'IMG_1.HEIC', 'Fandom A|IMG_1.HEIC|123|1700000000', data, 'admin')   # legacy key with lastModified
+        self.assertTrue(first['reason'].startswith(collab.UNREADABLE))
+        with patch.object(collab, 'ocr_ids', return_value=('1234567890ABCDEF',) * 2):
+            again = collab.process('Fandom A', 'IMG_1.HEIC', 'Fandom A|IMG_1.HEIC|123', data, 'admin')     # stable key, same file
+        self.assertFalse(again.get('repeat'))
+        self.assertEqual(again['status'], 'valid')
+        row = collab.summary()['submissions'][0]
+        self.assertEqual((row['files'], row['valid'], row['manual']), (1, 1, 0))
+
+
 class ReportLinks(Base):
     def setUp(self):
         super().setUp()
@@ -689,6 +703,19 @@ class Screenshots(Base):
         self.assertEqual(self.send(screenshot(certificate(1, first_seed=self.LINGSHOT)), 'a', fandom='Lingshot')['status'], 'valid')
         self.assertEqual(self.send(certificate(1, first_seed=self.LINGSHOT, extra=4), 'b', ids=('BBBBBBBBBBBBBBBB',) * 2, fandom='Lingshot')['status'], 'valid')
         self.assertEqual(self.send(screenshot(certificate(1, first_seed=77)), 'c', ids=('CCCCCCCCCCCCCCCC',) * 2, fandom='Lingshot')['status'], 'not_partner')
+
+    def test_ad_banner_just_above_the_card(self):
+        # a saturated ad a few white rows above the card used to merge with it, so the card was not found
+        data = screenshot(certificate(1), colored_ad=True, top=610)
+        x0, y0, x1, y1 = collab.find_card(Image.open(io.BytesIO(data)))
+        self.assertTrue(abs(y0 - 610) <= 4 and abs(x0 - 138) <= 4, (x0, y0, x1, y1))
+        self.assertEqual(self.send(data, 'near-ad')['status'], 'valid')
+
+    def test_tiny_screenshot_goes_to_review_with_the_id_prefilled(self):
+        result = self.send(screenshot(certificate(1), size=(240, 512), card_width=180, top=150, bare=True), 'tiny', ids=('1234567890ABCDEF',) * 2)
+        self.assertEqual(result['status'], 'manual')
+        self.assertIn('Low-resolution', result['reason'])
+        self.assertEqual(result['cert_id'], '1234567890ABCDEF')
 
     def test_screenshot_without_the_card_goes_to_manual_review(self):
         page = Image.new('RGB', (1080, 2280), (255, 255, 255))

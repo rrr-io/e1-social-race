@@ -58,6 +58,7 @@ ID_BOX = (0.04, 0.903, 0.66, 0.959)   # the whole "No. <ID>" line, with some mar
 SHOT_TOP, SHOT_BOTTOM = -0.0055, 0.001   # frame edges relative to the detected card height
 SHOT_SHIFTS = tuple((dx * 0.0025, dy * 0.0025) for dx in range(-4, 5) for dy in range(-4, 5))
 NO_SHIFT = ((0.0, 0.0),)
+MIN_CARD_WIDTH = 300   # certificate cards narrower than this (in pixels) are too small to trust the OCR
 ID_RE = re.compile(r'[A-Z0-9]{16}')
 ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 STATUSES = ('valid', 'duplicate', 'not_enhypen', 'not_partner', 'manual', 'rejected')
@@ -279,8 +280,16 @@ def find_card(im):
     small = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.BOX)
     mask = small.convert('HSV').getchannel('S').point(lambda v: 255 if v > 10 else 0)
     w, h = mask.size
+    rows = [v / 255 for v in mask.resize((1, h), Image.BOX).tobytes()]
+    # The card has pale stretches that need bridging, but an ad banner can sit just a few white rows above or
+    # below it: so every chain of tightly separated stretches is tried too, not only the widely bridged ones.
+    tight = runs(rows, 0.25, 2)
+    bands = set(runs(rows, 0.25, max(2, h // 40)))
+    bands.update((tight[i][0], tight[j][1]) for i in range(len(tight)) for j in range(i, min(len(tight), i + 12)))
     best = None
-    for y0, y1 in runs([v / 255 for v in mask.resize((1, h), Image.BOX).tobytes()], 0.25, max(2, h // 40)):
+    for y0, y1 in sorted(bands):
+        if y1 - y0 < h * 0.15:
+            continue
         band = mask.crop((0, y0, w, y1))
         for x0, x1 in runs([v / 255 for v in band.resize((w, 1), Image.BOX).tobytes()], 0.4, max(2, w // 60)):
             if x1 - x0 < w * 0.4 or abs((x1 - x0) / (y1 - y0) / RATIO - 1) > 0.04:
@@ -584,6 +593,8 @@ def analyse(data, refs, partner=None):
     if not ranked:
         return 'manual', 'Certificate ID not readable', None, last, thumb
     best = consensus(readings)
+    if im.width < MIN_CARD_WIDTH:  # a tiny screenshot: the ID is a few pixels tall and the OCR invents characters
+        return 'manual', f'Low-resolution image ({im.width} px wide): check the ID', best or unsure_guess(readings) or ranked[0][0], last, thumb
     if best:
         return 'ok', '', best, last, None
     likely = unsure_guess(readings)
@@ -608,9 +619,6 @@ def process(fandom, file_name, file_key, data, actor, day=None):
     sha = hashlib.sha256(data).hexdigest()
     with storage.connection() as c:
         again = existing(c, file_key)
-        if again and again['status'] == 'manual' and again['reason'].startswith(UNREADABLE) and open_image(data) is not None:
-            c.execute('DELETE FROM collab_proofs WHERE id=?', (again['id'],))   # it could not be opened before (e.g. HEIC) and now it can: check it for real
-            again = None
         profile = c.execute('SELECT id,name,slots FROM collab_collabs WHERE name=?', (fandom,)).fetchone()
         if not profile:
             raise ValueError(f'"{fandom}" is not a defined collab. Add it in the Collabs section first.')
@@ -619,6 +627,10 @@ def process(fandom, file_name, file_key, data, actor, day=None):
             same = c.execute('''SELECT p.id,p.status,p.reason,p.cert_id,s.fandom,s.day FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id
                 WHERE p.sha256=? AND s.fandom=? AND s.day=? AND p.file_name=? LIMIT 1''', (sha, fandom, day, file_name)).fetchone()
             again = None if same is None else {**dict(same), 'repeat': True}
+        if again and again['status'] == 'manual' and (again['reason'] or '').startswith(UNREADABLE) and open_image(data) is not None:
+            # it could not be opened before (e.g. HEIC), under this key or an older one, and now it can: check it for real
+            c.execute('DELETE FROM collab_proofs WHERE id=?', (again['id'],))
+            again = None
         refs = [json.loads(r['vec']) for r in c.execute('SELECT vec FROM collab_refs WHERE collab_id IS NULL')]
         slots = json.loads(profile['slots'])
         partner = None
