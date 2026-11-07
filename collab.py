@@ -586,6 +586,10 @@ def process(fandom, file_name, file_key, data, actor, day=None):
         if not profile:
             raise ValueError(f'"{fandom}" is not a defined collab. Add it in the Collabs section first.')
         fandom = profile['name']
+        if not again:  # the same file (same bytes, same name) already in this run, sent another way (Drive, folder, images): a repeat, not a duplicate
+            same = c.execute('''SELECT p.id,p.status,p.reason,p.cert_id,s.fandom,s.day FROM collab_proofs p JOIN collab_submissions s ON s.id=p.submission_id
+                WHERE p.sha256=? AND s.fandom=? AND s.day=? AND p.file_name=? LIMIT 1''', (sha, fandom, day, file_name)).fetchone()
+            again = None if same is None else {**dict(same), 'repeat': True}
         refs = [json.loads(r['vec']) for r in c.execute('SELECT vec FROM collab_refs WHERE collab_id IS NULL')]
         slots = json.loads(profile['slots'])
         partner = None
@@ -685,7 +689,9 @@ def summary():
             coalesce(sum(p.status='valid'),0) valid, coalesce(sum(p.status='duplicate'),0) duplicate,
             coalesce(sum(p.status='not_enhypen'),0) not_enhypen, coalesce(sum(p.status='not_partner'),0) not_partner,
             coalesce(sum(p.status='manual'),0) manual,
-            coalesce(sum(p.status='rejected'),0) rejected, (SELECT token FROM collab_shares WHERE submission_id=s.id) share_token
+            coalesce(sum(p.status='rejected'),0) rejected, (SELECT token FROM collab_shares WHERE submission_id=s.id) share_token,
+            coalesce(sum(p.status='duplicate' AND EXISTS(SELECT 1 FROM collab_proofs q WHERE q.submission_id=p.submission_id AND q.sha256=p.sha256
+              AND q.file_name=p.file_name AND q.id<p.id)),0) repeats
             FROM collab_submissions s LEFT JOIN collab_proofs p ON p.submission_id=s.id
             GROUP BY s.id ORDER BY s.day DESC, s.fandom COLLATE NOCASE''')]
         refs = [dict(r) for r in c.execute('SELECT id,label,created_at FROM collab_refs WHERE collab_id IS NULL ORDER BY id')]
@@ -998,6 +1004,18 @@ def delete_run(submission_id, actor):
     return {'ok': True, 'files': files, 'freed': len(counted) - promoted, 'promoted': promoted}
 
 
+def tidy_run(submission_id):
+    """Removes the duplicates of a run that are the same file sent twice (same bytes and name), e.g. a folder uploaded again after an import."""
+    with storage.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if not c.execute('SELECT 1 FROM collab_submissions WHERE id=?', (submission_id,)).fetchone():
+            raise ValueError('Run not found')
+        removed = c.execute("""DELETE FROM collab_proofs WHERE submission_id=? AND status='duplicate' AND EXISTS(
+            SELECT 1 FROM collab_proofs q WHERE q.submission_id=collab_proofs.submission_id AND q.sha256=collab_proofs.sha256
+            AND q.file_name=collab_proofs.file_name AND q.id<collab_proofs.id)""", (submission_id,)).rowcount
+    return {'ok': True, 'removed': removed}
+
+
 def retry_where(kind):
     """The review proofs a new check can change, from their stored preview. 'all' is every list at once."""
     if kind != 'all' and kind not in RETRY_KINDS:
@@ -1119,7 +1137,7 @@ DRIVE_MAX_FILES = 60000
 DRIVE_MAX_DEPTH = 8
 IMAGE_NAME = re.compile(r'\.(png|jpe?g|webp|gif|bmp|heic|heif)$', re.I)
 IMPORT_LOCK = threading.Lock()
-IMPORT = {'running': False, 'stopping': False, 'phase': '', 'source': '', 'fandom': '', 'day': '', 'found': 0, 'skipped': 0, 'total': 0, 'done': 0,
+IMPORT = {'running': False, 'stopping': False, 'phase': '', 'source': '', 'fandom': '', 'day': '', 'found': 0, 'skipped': 0, 'total': 0, 'done': 0, 'began': 0.0,
           'counts': {}, 'failed': 0, 'refused': 0, 'errors': [], 'error': None, 'started': 0.0, 'finished': 0.0}
 
 
@@ -1294,7 +1312,7 @@ def import_start(url, fandom, day, actor):
             done_keys = set(known([f'drive:{i}' for i, _ in found]))
             todo = [(i, p) for i, p in found if f'drive:{i}' not in done_keys]
             with IMPORT_LOCK:
-                IMPORT.update(phase='checking', skipped=len(found) - len(todo), total=len(todo))
+                IMPORT.update(phase='checking', skipped=len(found) - len(todo), total=len(todo), began=time.time())
             queue = iter(todo)
             queue_lock = threading.Lock()
 
@@ -1418,6 +1436,9 @@ def mutate(path, payload, actor):
         if match[2] == 'read':
             return read_proof_id(int(match[1]))
         return reject(int(match[1]), actor)
+    match = re.fullmatch(r'/api/collab/submissions/(\d+)/tidy', path)
+    if match:
+        return tidy_run(int(match[1]))
     match = re.fullmatch(r'/api/collab/submissions/(\d+)/delete', path)
     if match:
         return delete_run(int(match[1]), actor)

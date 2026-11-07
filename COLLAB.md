@@ -82,3 +82,7 @@ In **Upload**, under the folder pickers, paste a Google Drive link and press **I
 ## Deleting a run
 
 If a run was started for the wrong collab, press **Delete run** on its row in the Recap (after a confirmation). Its proofs are removed as if they had never been uploaded: the IDs it had counted are free again, the same files can be uploaded or imported again (also for the right collab), and its report link stops working. The certificates are not penalised: if a proof in another run had been set aside as a duplicate of one of those IDs, it becomes the counted one. A run with a Drive import still running cannot be deleted: stop the import first. The deletion cannot be undone.
+
+## The same file sent twice
+
+A file with the same name and the same content as one already in the run (for example a folder uploaded again after a Drive import, or the other way round) is recognised as a repeat: it is not recorded again and does not add a duplicate. A file with another name but the same content is still a duplicate. Runs recorded by older versions may show such repeats as duplicates: the Recap row then has **Remove N repeats**, which deletes only those; valid proofs are never touched.

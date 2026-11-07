@@ -420,6 +420,37 @@ class DeleteRun(Base):
             self.assertEqual([c.execute(f'SELECT count(*) FROM {t}').fetchone()[0] for t in ('collab_proofs', 'collab_submissions', 'collab_mask')], [0, 0, 0])
 
 
+
+class Repeats(Base):
+    def test_the_same_file_sent_again_is_not_a_new_duplicate(self):
+        first = self.send(certificate(1, extra=1), 'drive:abc', ids=('1234567890ABCDEF',) * 2)
+        with patch.object(collab, 'ocr_ids', return_value=('1234567890ABCDEF',) * 2):
+            again = collab.process('Fandom A', 'drive:abc.png', 'local|key', certificate(1, extra=1), 'admin')   # same bytes and name, other source
+        self.assertTrue(again.get('repeat'))
+        self.assertEqual((again['id'], again['status']), (first['id'], 'valid'))
+        # a different name with the same content is a real duplicate
+        with patch.object(collab, 'ocr_ids', return_value=('1234567890ABCDEF',) * 2):
+            other = collab.process('Fandom A', 'copy.png', 'local|copy', certificate(1, extra=1), 'admin')
+        self.assertEqual(other['status'], 'duplicate')
+        row = collab.summary()['submissions'][0]
+        self.assertEqual((row['files'], row['valid'], row['duplicate'], row['repeats']), (2, 1, 1, 0))
+
+    def test_tidy_removes_repeats_already_recorded(self):
+        self.send(certificate(1, extra=1), 'a', ids=('1234567890ABCDEF',) * 2)
+        run = collab.summary()['submissions'][0]['id']
+        with storage.connection() as c:    # what the older version recorded when a folder was uploaded twice
+            first = c.execute('SELECT * FROM collab_proofs').fetchone()
+            c.execute("INSERT INTO collab_proofs(submission_id,file_key,file_name,sha256,cert_id,status,reason,created_at) VALUES(?,?,?,?,?,'duplicate','x',?)",
+                      (run, 'other-key', first['file_name'], first['sha256'], first['cert_id'], 1.0))
+            c.execute("INSERT INTO collab_proofs(submission_id,file_key,file_name,sha256,cert_id,status,reason,created_at) VALUES(?,?,?,?,?,'duplicate','x',?)",
+                      (run, 'other-key2', 'real-copy.png', first['sha256'], first['cert_id'], 1.0))
+        row = collab.summary()['submissions'][0]
+        self.assertEqual((row['duplicate'], row['repeats']), (2, 1))
+        self.assertEqual(collab.tidy_run(run)['removed'], 1)
+        row = collab.summary()['submissions'][0]
+        self.assertEqual((row['files'], row['valid'], row['duplicate'], row['repeats']), (2, 1, 1, 0))
+
+
 class ReportLinks(Base):
     def setUp(self):
         super().setUp()

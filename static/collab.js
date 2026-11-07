@@ -2,7 +2,7 @@
 'use strict';
 const {request, asRequestError, toast, fmt, labelCells, busy} = window.E1;
 const $ = s => document.querySelector(s);
-const PAGE = 10, LANES = 4, KNOWN_BATCH = 1000;
+const PAGE = 10, LANES = 4, KNOWN_BATCH = 900;
 const IMAGE = /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i;
 const JUNK = /(^|\/)(__MACOSX|\.[^/]+)(\/|$)/;
 const SLOT_WORD = ['first', 'second'];
@@ -103,6 +103,17 @@ function runCell(s) {
       offset = 0; await Promise.all([loadSummary(), loadQueue()]);
     } catch (e) { fail(e); remove.disabled = false; }
   });
+  if (s.repeats) {  // the same files sent twice (for example a folder uploaded again after a Drive import) show up as duplicates
+    const tidy = el('button', 'btn-ghost', `Remove ${fmt(s.repeats)} repeats`); tidy.type = 'button';
+    tidy.title = 'Duplicates that are the very same file (same name and content) already in this run';
+    tidy.addEventListener('click', async () => {
+      if (!confirm(`Remove ${fmt(s.repeats)} duplicate${s.repeats === 1 ? '' : 's'} of ${s.fandom} (${s.day}) that are the same file already in this run?\n\nValid proofs are not touched.`)) return;
+      tidy.disabled = true;
+      try { const r = await request(`/api/collab/submissions/${s.id}/tidy`, {}); toast('success', 'Repeats removed', `${fmt(r.removed)} removed.`); await loadSummary(); }
+      catch (e) { fail(e); tidy.disabled = false; }
+    });
+    td.append(tidy, ' ');
+  }
   td.append(card, ' ', csv('Stats CSV', 'stats'), ' ', csv('Report CSV', 'full'), ' ', shareCell(s), ' ', remove);
   return td;
 }
@@ -326,12 +337,12 @@ function collect() {
   const fandom = $('#collab').value, items = [];
   for (const file of $('#files').files) {
     if (!IMAGE.test(file.name)) continue;
-    items.push({file, name: file.name, fandom, key: `${fandom}|${file.name}|${file.size}|${file.lastModified}`});
+    items.push({file, name: file.name, fandom, key: `${fandom}|${file.name}|${file.size}`, old: `${fandom}|${file.name}|${file.size}|${file.lastModified}`});
   }
   for (const file of $('#folder').files) {
     const path = file.webkitRelativePath || file.name;
     if (JUNK.test(path) || !IMAGE.test(file.name)) continue;
-    items.push({file, name: path.split('/').slice(1).join('/') || file.name, fandom, key: `${fandom}|${path}|${file.size}|${file.lastModified}`});
+    items.push({file, name: path.split('/').slice(1).join('/') || file.name, fandom, key: `${fandom}|${path}|${file.size}`, old: `${fandom}|${path}|${file.size}|${file.lastModified}`});
   }
   return items;
 }
@@ -361,10 +372,12 @@ async function send(item, day) {
 async function skipKnown(items) {
   const known = new Set();
   for (let i = 0; i < items.length; i += KNOWN_BATCH) {
-    const keys = items.slice(i, i + KNOWN_BATCH).map(x => x.key);
+    // The key no longer includes the modification date (phones report a different one every time a file is picked); the old key is still
+    // asked about, so files uploaded by earlier versions are recognised too.
+    const keys = items.slice(i, i + KNOWN_BATCH).flatMap(x => [x.key, x.old]);
     (await request('/api/collab/known', {keys})).known.forEach(k => known.add(k));
   }
-  return items.filter(x => !known.has(x.key));
+  return items.filter(x => !known.has(x.key) && !known.has(x.old));
 }
 
 function setRunning(on) {
@@ -557,9 +570,9 @@ function drawDrive(job) {
   if ($('#drive-run').hidden) return;
   const pct = job.total ? job.done / job.total * 100 : job.phase === 'listing' ? 0 : 100;
   $('#drive-fill').style.width = `${pct}%`; $('#drive-bar').setAttribute('aria-valuenow', String(Math.round(pct)));
-  const rate = job.done / Math.max((Date.now() / 1000 - job.started), 1);
+  const rate = job.done / Math.max((Date.now() / 1000 - (job.began || job.started)), 1);   // counted from when the checking began, not from the listing
   let text = job.phase === 'listing' ? `Reading the Drive folder… ${fmt(job.found)} images found`
-    : `${job.fandom} · ${job.day}: ${fmt(job.done)} of ${fmt(job.total)} files · ${rate.toFixed(1)} per second` + (job.running && job.done ? ` · about ${E1.duration((job.total - job.done) / rate)} left` : '') +
+    : `${job.fandom} · ${job.day}: ${fmt(job.done)} of ${fmt(job.total)} files · ${rate.toFixed(1)} per second` + (job.running && job.done >= 10 ? ` · about ${E1.duration((job.total - job.done) / rate)} left` : '') +
       (job.skipped ? ` · ${fmt(job.skipped)} already processed, skipped` : '');
   if (job.stopping && job.running) text += ' · Stopping…';
   else if (job.phase === 'done') text += job.error ? '' : ' · Done.';
