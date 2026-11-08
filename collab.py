@@ -80,6 +80,8 @@ SCHEMA = '''
     -- A private link to the report of one batch (collab + proofs date): whoever holds it can review that batch only.
     CREATE TABLE IF NOT EXISTS collab_shares(submission_id INTEGER PRIMARY KEY REFERENCES collab_submissions(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE, created_at REAL NOT NULL);
+    -- A private link to the whole report of one collab (all its proofs dates), read-only.
+    CREATE TABLE IF NOT EXISTS collab_collab_shares(fandom TEXT PRIMARY KEY COLLATE NOCASE, token TEXT NOT NULL UNIQUE, created_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS collab_proofs(id INTEGER PRIMARY KEY,
       submission_id INTEGER NOT NULL REFERENCES collab_submissions(id),
       file_key TEXT NOT NULL UNIQUE, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, cert_id TEXT,
@@ -817,7 +819,8 @@ def summary():
             FROM collab_submissions s LEFT JOIN collab_proofs p ON p.submission_id=s.id
             GROUP BY s.id ORDER BY s.day DESC, s.fandom COLLATE NOCASE''')]
         refs = [dict(r) for r in c.execute('SELECT id,label,created_at FROM collab_refs WHERE collab_id IS NULL ORDER BY id')]
-        collabs = [dict(r) for r in c.execute('SELECT id,name,slots FROM collab_collabs ORDER BY name')]
+        collabs = [dict(r) for r in c.execute('''SELECT id,name,slots,(SELECT token FROM collab_collab_shares h WHERE h.fandom=collab_collabs.name) share_token
+            FROM collab_collabs ORDER BY name''')]
         for item in collabs:
             item['slots'] = json.loads(item['slots'])
             item['refs'] = [dict(r) for r in c.execute('SELECT id,label FROM collab_refs WHERE collab_id=? ORDER BY id', (item['id'],))]
@@ -1091,6 +1094,91 @@ def report_post(path, payload):
     if not match:
         return None
     return report_act(match[1], int(match[2]), match[3], payload)
+
+# ---------------------------------------------------------------- collab report (all the days of one collab)
+def collab_name(c, collab_id):
+    row = c.execute('SELECT name FROM collab_collabs WHERE id=?', (collab_id,)).fetchone()
+    if not row:
+        raise ValueError('Collab not found')
+    return row['name']
+
+
+def collab_share_create(collab_id, renew=False):
+    """The private link to the whole report of a collab. Made on first use; `renew` replaces it (the old link stops working)."""
+    with storage.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        name = collab_name(c, collab_id)
+        row = c.execute('SELECT token FROM collab_collab_shares WHERE fandom=?', (name,)).fetchone()
+        if row and not renew:
+            return {'token': row['token']}
+        token = secrets.token_urlsafe(24)
+        c.execute('INSERT OR REPLACE INTO collab_collab_shares(fandom,token,created_at) VALUES(?,?,?)', (name, token, time.time()))
+    return {'token': token}
+
+
+def collab_share_revoke(collab_id):
+    with storage.connection() as c:
+        c.execute('DELETE FROM collab_collab_shares WHERE fandom=?', (collab_name(c, collab_id),))
+    return {'ok': True}
+
+
+def overview(c, fandom, with_links=False):
+    """Totals of a collab over all its runs, and one row per proofs date (with that run's report link if asked)."""
+    runs = [dict(r) for r in c.execute('''SELECT s.id,s.day,count(p.id) files,
+        coalesce(sum(p.status='valid'),0) valid, coalesce(sum(p.status='duplicate'),0) duplicate,
+        coalesce(sum(p.status='not_enhypen'),0) not_enhypen, coalesce(sum(p.status='not_partner'),0) not_partner,
+        coalesce(sum(p.status='manual'),0) manual, coalesce(sum(p.status='rejected'),0) rejected
+        FROM collab_submissions s LEFT JOIN collab_proofs p ON p.submission_id=s.id WHERE s.fandom=? GROUP BY s.id ORDER BY s.day''', (fandom,))]
+    totals = {k: sum(r[k] for r in runs) for k in ('files',) + STATUSES}
+    for r in runs:
+        if with_links:   # every day of the report opens that day's own report, so the links are made as needed
+            row = c.execute('SELECT token FROM collab_shares WHERE submission_id=?', (r['id'],)).fetchone()
+            if not row:
+                row = {'token': secrets.token_urlsafe(24)}
+                c.execute('INSERT INTO collab_shares(submission_id,token,created_at) VALUES(?,?,?)', (r['id'], row['token'], time.time()))
+            r['report'] = row['token']
+        del r['id']
+    return {'fandom': fandom, 'totals': totals, 'days': runs, 'first': runs[0]['day'] if runs else None, 'last': runs[-1]['day'] if runs else None}
+
+
+def collab_overview(collab_id):
+    with storage.connection() as c:
+        return overview(c, collab_name(c, collab_id))
+
+
+def collab_report(token):
+    with storage.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute('SELECT fandom FROM collab_collab_shares WHERE token=?', (clean(token, 80),)).fetchone()
+        if not row:
+            raise LookupError('This link is not valid any more. Ask for a new one.')
+        return overview(c, row['fandom'], with_links=True)
+
+
+def overview_csv(data):
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(['collab', 'proofs_date', 'files', *STATUSES])
+    for r in data['days']:
+        writer.writerow([data['fandom'], r['day'], r['files'], *(r[k] for k in STATUSES)])
+    writer.writerow([data['fandom'], 'total', data['totals']['files'], *(data['totals'][k] for k in STATUSES)])
+    return out.getvalue()
+
+
+def collab_report_get(path):
+    """Public GET routes of a collab report (the link is the credential): (status, body, content type[, headers]) or None."""
+    match = re.fullmatch(r'/api/collab-report/([\w-]{20,64})(/export\.csv)?', path)
+    if not match:
+        return None
+    try:
+        data = collab_report(match[1])
+    except LookupError as exc:
+        return 404, {'error': str(exc)}, 'application/json; charset=utf-8'
+    if match[2]:
+        name = re.sub(r'[^\w-]+', '-', data['fandom']).strip('-') or 'collab'
+        return 200, overview_csv(data), 'text/csv; charset=utf-8', {'Content-Disposition': f'attachment; filename="collab-report-{name}.csv"'}
+    return 200, data, 'application/json; charset=utf-8'
+
 
 
 def delete_run(submission_id, actor):
@@ -1496,6 +1584,9 @@ def get(path, query):
     """Returns (status, body, content_type) for authenticated GET requests, or None if not a collab route."""
     if path == '/api/collab/summary':
         return 200, summary(), 'application/json; charset=utf-8'
+    match = re.fullmatch(r'/api/collab/collabs/(\d+)/overview', path)
+    if match:
+        return 200, collab_overview(int(match[1])), 'application/json; charset=utf-8'
     if path == '/api/collab/queue':
         offset = max(0, int((query.get('offset') or ['0'])[0]))
         kind = (query.get('kind') or ['manual'])[0]
@@ -1574,6 +1665,11 @@ def mutate(path, payload, actor):
     match = re.fullmatch(r'/api/collab/collabs/(\d+)/delete', path)
     if match:
         return delete_collab(int(match[1]))
+    match = re.fullmatch(r'/api/collab/collabs/(\d+)/(share|share/renew|share/revoke)', path)
+    if match:
+        if match[2] == 'share/revoke':
+            return collab_share_revoke(int(match[1]))
+        return collab_share_create(int(match[1]), renew=match[2] == 'share/renew')
     match = re.fullmatch(r'/api/collab/refs/(\d+)/delete', path)
     if match:
         with storage.connection() as c:

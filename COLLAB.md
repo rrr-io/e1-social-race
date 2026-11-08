@@ -69,6 +69,14 @@ Teams send their folder to the organiser, who uploads it. In the **Recap** table
 
 The Recap table has one row per verification run (collab + proofs date). Each row has **Card** (the share image: collab name, valid proofs and the run date), **Stats CSV** (the run's counts), **Report CSV** (the result of every file of the run) and the report link. Uploading more files for the same collab and date adds them to the same run.
 
+## Collab report (all the days of one collab)
+
+In **Recap → By collab** every collab has its totals over all proofs dates. **Open** shows its collab report and **Make link / Copy link** gives a private link to it (`/collab-report/<token>`), to send to that fandom.
+
+The page shows the totals of the collab (valid proofs, files, duplicates, to verify, rejected…) and one row per proofs date with that day's numbers. **Open** on a row goes to the report of that day (the batch report link, made automatically if it did not exist yet), where doubtful proofs can be accepted or rejected. **Download CSV** gives the same table, with a total row.
+
+Nothing about other collabs is shown. **Stop sharing** turns the collab link off; the day links are separate and keep working until each is stopped in **By run**.
+
 ## Importing from Google Drive
 
 In **Upload**, under the folder pickers, paste a Google Drive link and press **Import from Drive**. The server lists the images of the folder (sub-folders included) or reads the single image, downloads them itself and checks them like any upload, using the collab and the proofs date chosen above. Nothing is downloaded on your device, and you can close the page: the progress is there when you come back.

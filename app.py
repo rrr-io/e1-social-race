@@ -84,6 +84,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, race.read())
         public = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css'),
                   '/common.js': ('common.js', 'application/javascript'), '/report.js': ('report.js', 'application/javascript'),
+                  '/collab-report.js': ('collab-report.js', 'application/javascript'),
                   '/style.css': ('style.css', 'text/css'), '/collab.css': ('collab.css', 'text/css'), '/common.css': ('common.css', 'text/css'),
                   '/e1-logo.png': ('e1-logo.png', 'image/png'), '/favicon.ico': ('favicon.ico', 'image/x-icon'),
                   '/favicon-32.png': ('favicon-32.png', 'image/png'), '/apple-touch-icon.png': ('apple-touch-icon.png', 'image/png'),
@@ -91,6 +92,14 @@ class Handler(BaseHTTPRequestHandler):
         if re.fullmatch(r'/report/[\w-]{20,64}', path):  # the link itself is the credential; keep it out of search engines and referrers
             return self.reply(200, (STATIC / 'report.html').read_bytes(), 'text/html; charset=utf-8',
                               {'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer'})
+        if re.fullmatch(r'/collab-report/[\w-]{20,64}', path):  # the whole report of one collab; also a secret link
+            return self.reply(200, (STATIC / 'collab-report.html').read_bytes(), 'text/html; charset=utf-8',
+                              {'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer'})
+        if path.startswith('/api/collab-report/'):
+            result = collab.collab_report_get(path)
+            if result:
+                status, body, mime, *headers = result
+                return self.reply(status, body, mime, {'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer', **(headers[0] if headers else {})})
         if path.startswith('/api/report/'):
             try:
                 result = collab.report_get(path, parse_qs(urlsplit(self.path).query))

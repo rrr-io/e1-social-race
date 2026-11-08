@@ -491,6 +491,54 @@ class UnreadableUnderAnOldKey(Base):
         self.assertEqual((row['files'], row['valid'], row['manual']), (1, 1, 0))
 
 
+class CollabReport(Base):
+    def setUp(self):
+        super().setUp()
+        with patch.object(collab, 'ocr_ids', return_value=('AAAAAAAAAAAAAAAA',) * 2):
+            collab.process('Fandom A', 'a1.png', 'a1', certificate(1, extra=1), 'admin', '2026-11-05')
+        with patch.object(collab, 'ocr_ids', return_value=('CCCCCCCCCCCCCCCC',) * 2):
+            collab.process('Fandom A', 'a2.png', 'a2', certificate(1, extra=2), 'admin', '2026-11-06')
+        with patch.object(collab, 'ocr_ids', return_value=('AAAAAAAAAAAAAAAA',) * 2):
+            collab.process('Fandom A', 'a3.png', 'a3', certificate(1, extra=3), 'admin', '2026-11-06')   # a duplicate
+        with patch.object(collab, 'ocr_ids', return_value=('EEEEEEEEEEEEEEEE',) * 2):
+            collab.process('Fandom B', 'b1.png', 'b1', certificate(1, extra=4), 'admin', '2026-11-06')
+        self.ids = {c['name']: c['id'] for c in collab.summary()['collabs']}
+
+    def test_totals_and_one_row_per_day(self):
+        data = collab.collab_overview(self.ids['Fandom A'])
+        self.assertEqual([d['day'] for d in data['days']], ['2026-11-05', '2026-11-06'])
+        self.assertEqual((data['totals']['files'], data['totals']['valid'], data['totals']['duplicate']), (3, 2, 1))
+        self.assertEqual((data['first'], data['last']), ('2026-11-05', '2026-11-06'))
+        self.assertNotIn('report', data['days'][0])
+
+    def test_link_shows_only_that_collab_and_opens_each_day(self):
+        token = collab.collab_share_create(self.ids['Fandom A'])['token']
+        self.assertEqual(collab.collab_share_create(self.ids['Fandom A'])['token'], token)   # the same link until renewed
+        status, data, _ = collab.collab_report_get(f'/api/collab-report/{token}')
+        self.assertEqual((status, data['fandom'], data['totals']['files']), (200, 'Fandom A', 3))
+        for day in data['days']:   # each day opens that day's own report
+            self.assertEqual(collab.report(day['report'])['day'], day['day'])
+            self.assertEqual(collab.report(day['report'])['fandom'], 'Fandom A')
+        self.assertEqual(collab.collab_report(token)['days'][1]['report'], data['days'][1]['report'])   # made once
+        self.assertEqual({c['name']: c['share_token'] for c in collab.summary()['collabs']}['Fandom A'], token)
+        status, text, mime, headers = collab.collab_report_get(f'/api/collab-report/{token}/export.csv')
+        lines = text.strip().splitlines()
+        self.assertEqual(lines[0].split(',')[:4], ['collab', 'proofs_date', 'files', 'valid'])
+        self.assertEqual(lines[-1].split(',')[1:4], ['total', '3', '2'])
+        self.assertIn('Fandom-A', headers['Content-Disposition'])
+
+    def test_stopped_or_renewed_link_stops_working(self):
+        token = collab.collab_share_create(self.ids['Fandom A'])['token']
+        renewed = collab.collab_share_create(self.ids['Fandom A'], renew=True)['token']
+        self.assertNotEqual(token, renewed)
+        self.assertEqual(collab.collab_report_get(f'/api/collab-report/{token}')[0], 404)
+        collab.collab_share_revoke(self.ids['Fandom A'])
+        self.assertEqual(collab.collab_report_get(f'/api/collab-report/{renewed}')[0], 404)
+        self.assertIsNone(collab.collab_report_get('/api/collab-report/x'))
+        with self.assertRaises(ValueError):
+            collab.collab_share_create(99999)
+
+
 class ReportLinks(Base):
     def setUp(self):
         super().setUp()

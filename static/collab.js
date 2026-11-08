@@ -140,7 +140,48 @@ function shareCell(s) {
   return td;
 }
 
+const collabUrl = token => `${location.origin}/collab-report/${token}`;
+function renderCollabReports() {
+  const body = $('#collab-body'); body.replaceChildren();
+  for (const c of data.collabs) {
+    const runs = data.submissions.filter(s => s.fandom.toLowerCase() === c.name.toLowerCase());
+    const total = sumCounts(runs);
+    const tr = el('tr');
+    tr.append(el('td', null, c.name));
+    const valid = el('td', 'num'); valid.append(el('strong', null, fmt(total.valid))); tr.append(valid);
+    tr.append(el('td', 'num', fmt(runs.length)), el('td', 'num', fmt(total.files)), el('td', 'num', fmt(total.manual)));
+    const td = el('td', 'run-actions');
+    const token = async () => c.share_token || (await request(`/api/collab/collabs/${c.id}/share`, {})).token;
+    const open = el('button', 'btn-ghost', 'Open'); open.type = 'button';
+    open.setAttribute('aria-label', `Open the collab report of ${c.name}`);
+    open.addEventListener('click', async () => {
+      const tab = window.open('', '_blank');   // opened at once, so the browser does not block it while the link is made
+      try { const t = await token(); if (tab) { tab.opener = null; tab.location = collabUrl(t); } else location.href = collabUrl(t); if (!c.share_token) await loadSummary(); }
+      catch (e) { if (tab) tab.close(); fail(e); }
+    });
+    const copy = el('button', 'btn-ghost', c.share_token ? 'Copy link' : 'Make link'); copy.type = 'button';
+    copy.addEventListener('click', async () => {
+      copy.disabled = true;
+      try { await copyLink(collabUrl(await token())); if (!c.share_token) await loadSummary(); }
+      catch (e) { fail(e); } finally { copy.disabled = false; }
+    });
+    td.append(open, ' ', copy);
+    if (c.share_token) {
+      const stop = el('button', 'btn-ghost', 'Stop sharing'); stop.type = 'button';
+      stop.addEventListener('click', async () => {
+        if (!confirm(`Stop sharing the collab report of ${c.name}? The link stops working at once.`)) return;
+        try { await request(`/api/collab/collabs/${c.id}/share/revoke`, {}); await loadSummary(); } catch (e) { fail(e); }
+      });
+      td.append(' ', stop);
+    }
+    tr.append(td); body.append(tr);
+  }
+  if (!data.collabs.length) { const tr = el('tr'); const td = el('td', 'muted', 'No collabs yet.'); td.colSpan = 6; tr.append(td); body.append(tr); }
+  labelCells($('#collab-table'));
+}
+
 function renderRecap() {
+  renderCollabReports();
   const select = $('#recap-day'), previous = select.value;
   const days = [...new Set(data.submissions.map(s => s.day))].sort().reverse();
   select.replaceChildren(new Option('All dates', ''), ...days.map(d => new Option(d, d)));
