@@ -54,8 +54,12 @@
         <h3 id="event-form-title">Add posting event</h3>
         <input type="hidden" name="event_id">
         <label>Event name<input name="name" required maxlength="500" autocomplete="off" placeholder="e.g. Race 1 · Opening lap"></label>
+        <label>Type<select name="kind" id="event-kind">
+          <option value="grand-prix">Grand Prix event</option>
+          <option value="special">Special event</option>
+        </select><small class="field-hint" id="event-kind-hint">Grand Prix events fall between 28 Oct 18:00 and 8 Nov 23:59 KST and add up in the Grand Prix total.</small></label>
         <div data-datetime="starts" data-label="Window opens (KST)"></div>
-        <div data-datetime="ends" data-label="Window closes (KST)" data-hint="Official events must fall between 28 Oct 18:00 and 8 Nov 23:59 KST."></div>
+        <div data-datetime="ends" data-label="Window closes (KST)"></div>
         <div class="form-actions"><button id="save-event" type="submit">Add event</button><button id="cancel-event" class="btn-ghost" type="button" hidden>Cancel edit</button></div>
         <p class="form-message" role="status" aria-live="polite"></p>
       </form>

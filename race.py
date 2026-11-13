@@ -37,12 +37,12 @@ def init(c):
       platform TEXT NOT NULL CHECK(platform IN ('instagram','tiktok')), name TEXT NOT NULL COLLATE NOCASE,
       UNIQUE(platform,name));
     CREATE TABLE IF NOT EXISTS race_events(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-      starts REAL NOT NULL, ends REAL NOT NULL);
+      starts REAL NOT NULL, ends REAL NOT NULL, kind TEXT NOT NULL DEFAULT 'grand-prix');
     CREATE TABLE IF NOT EXISTS race_entries(id INTEGER PRIMARY KEY,
       team_id INTEGER NOT NULL REFERENCES race_teams(id), creator_id INTEGER NOT NULL REFERENCES race_creators(id),
       event_id INTEGER NOT NULL REFERENCES race_events(id),
       post_id INTEGER NOT NULL UNIQUE REFERENCES posts(id), platform TEXT NOT NULL,
-      published_at REAL NOT NULL, UNIQUE(creator_id,event_id));
+      published_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS race_manual(id INTEGER PRIMARY KEY,
       entry_id INTEGER NOT NULL REFERENCES race_entries(id), observed_at REAL NOT NULL, recorded_at REAL NOT NULL,
       likes INTEGER, comments INTEGER, views INTEGER, final INTEGER NOT NULL DEFAULT 0,
@@ -57,7 +57,42 @@ def init(c):
 def migrate(path):
     """Bring older databases up to date (see the two steps below). Returns True if anything changed."""
     changed = migrate_representative(path)
-    return migrate_multi_creators(path) or changed
+    changed = migrate_multi_creators(path) or changed
+    return migrate_special_events(path) or changed
+
+
+def migrate_special_events(path):
+    """Special events: race_events gains `kind`; race_entries drops UNIQUE(creator_id,event_id)
+    (a creator can post several times in a special event; Grand Prix events keep the
+    one-post rule in code). Row ids are kept."""
+    import sqlite3
+    con = sqlite3.connect(path, timeout=15)
+    try:
+        con.execute('PRAGMA foreign_keys=OFF')
+        changed = False
+        columns = [r[1] for r in con.execute('PRAGMA table_info(race_events)')]
+        if columns and 'kind' not in columns:
+            con.execute("ALTER TABLE race_events ADD COLUMN kind TEXT NOT NULL DEFAULT 'grand-prix'")
+            con.commit()
+            changed = True
+        row = con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='race_entries'").fetchone()
+        if row and 'UNIQUE(creator_id,event_id)' in row[0].replace(' ', ''):
+            con.executescript("""
+            BEGIN;
+            CREATE TABLE race_entries_new(id INTEGER PRIMARY KEY,
+              team_id INTEGER NOT NULL REFERENCES race_teams(id), creator_id INTEGER NOT NULL REFERENCES race_creators(id),
+              event_id INTEGER NOT NULL REFERENCES race_events(id),
+              post_id INTEGER NOT NULL UNIQUE REFERENCES posts(id), platform TEXT NOT NULL,
+              published_at REAL NOT NULL);
+            INSERT INTO race_entries_new SELECT id,team_id,creator_id,event_id,post_id,platform,published_at FROM race_entries;
+            DROP TABLE race_entries;
+            ALTER TABLE race_entries_new RENAME TO race_entries;
+            COMMIT;
+            """)
+            changed = True
+        return changed
+    finally:
+        con.close()
 
 
 def migrate_multi_creators(path):
@@ -237,17 +272,27 @@ REFRESH_FRESH_SECONDS = 5 * 60
 CHECK_MINUTES = max(15, int(os.getenv('RACE_CHECK_MINUTES', '60')))
 
 
-def next_check(now):
+SPECIAL = 'special'
+KINDS = ('grand-prix', SPECIAL)
+
+
+def event_cutoff(ev):
+    """Engagement cutoff of an event: its close, never after the Grand Prix for Grand Prix
+    events. Special events are separate from the Grand Prix and can run after it."""
+    return ev['ends'] if ev['kind'] == SPECIAL else min(ev['ends'], END)
+
+
+def next_check(now, end=END):
     """Next scheduled observation: every CHECK_MINUTES on the KST clock, plus a final
-    attempt at the cutoff. Never backdated; nothing before the race unless simulating."""
-    if now >= END:
+    attempt at the cutoff (`end`). Never backdated; nothing before the race unless simulating."""
+    if now >= end:
         return 253402214400.0
     base = now if simulation_enabled() else max(now, START - 1)
     step = CHECK_MINUTES * 60
     local = datetime.fromtimestamp(base, KST)
     midnight = local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     due = midnight + ((base - midnight) // step + 1) * step
-    return min(due, END)
+    return min(due, end)
 
 
 NEVER = 253402214400.0
@@ -259,13 +304,13 @@ def post_next_check(c, post_id, now):
     """Schedule for a registered race post: hourly while its event is open, one last
     check just before the event closes, then nothing (its result is saved at close).
     None for posts that are not in the race."""
-    row = c.execute('SELECT ev.ends FROM race_entries e JOIN race_events ev ON ev.id=e.event_id WHERE e.post_id=?', (post_id,)).fetchone()
+    row = c.execute('SELECT ev.ends,ev.kind FROM race_entries e JOIN race_events ev ON ev.id=e.event_id WHERE e.post_id=?', (post_id,)).fetchone()
     if not row:
         return None
-    ends = min(row[0], END)
+    ends = event_cutoff(row)
     if now >= ends:
         return NEVER
-    due = next_check(now)
+    due = next_check(now, ends)
     if ends - PRECLOSE_SECONDS > now:
         due = min(due, ends - PRECLOSE_SECONDS)
     return min(due, ends)
@@ -325,7 +370,7 @@ def close_events(c, now=None):
     now = time.time() if now is None else now
     closed = c.execute('SELECT ev.* FROM race_events ev LEFT JOIN race_event_results r ON r.event_id=ev.id WHERE r.event_id IS NULL AND ev.ends<=?', (now,)).fetchall()
     for ev in closed:
-        cutoff = min(ev['ends'], END)
+        cutoff = event_cutoff(ev)
         data = {str(e['id']): entry_sample(c, dict(e), cutoff)
                 for e in c.execute('SELECT * FROM race_entries WHERE event_id=?', (ev['id'],)).fetchall()}
         c.execute('INSERT INTO race_event_results(event_id,frozen_at,data) VALUES(?,?,?)', (ev['id'], now, json.dumps(data)))
@@ -349,6 +394,25 @@ def make_boards(teams, entries, bonus):
     return boards
 
 
+def make_team_boards(teams, entries):
+    """Special events: one row per team, the sum of every post of all its creators."""
+    boards = {}
+    for platform in PLATFORMS:
+        rows = []
+        for team in teams:
+            posts = [e for e in entries if e['team_id'] == team['id'] and e['platform'] == platform]
+            if not posts and not team['creators'][platform]:
+                continue
+            names = list(dict.fromkeys(e.get('creator') or '?' for e in posts))
+            missing = sum(e['score'] is None for e in posts)
+            summary = ', '.join(names) if posts else 'No posts yet'  # the post count is shown next to it
+            rows.append({'team_id': team['id'], 'team': team['name'], 'creator_id': None, 'creator': summary, 'creators': names,
+                         'base_points': team['base_points'], 'posts': len(posts), 'missing': missing,
+                         'score': sum(e['score'] for e in posts) if posts and not missing else None})
+        boards[platform] = rank_rows(rows, bonus=False)
+    return boards
+
+
 def board(c):
     now = time.time()
     teams = teams_with_creators(c)
@@ -364,7 +428,8 @@ def board(c):
         e['simulation'] = ev['starts'] < START
         e['metric'] = SCORE_METRIC[e['platform']]
         frozen = saved.get(ev['id'], (None, {}))[1].get(str(e['id']))
-        e.update(frozen if frozen else entry_sample(c, e, min(now, ev['ends'], END)))
+        e.update(frozen if frozen else entry_sample(c, e, min(now, event_cutoff(ev))))
+        e['kind'] = ev['kind']
         e['final'] = ev['id'] in saved
         entries.append(e)
     if not simulation:
@@ -372,18 +437,29 @@ def board(c):
         teams = [team for team in teams if team['id'] not in test_only]
 
     # One scope per event (rankings restart each event), plus the Grand Prix total.
-    scopes = []
+    # Special events are separate: team rankings, not part of the total.
+    scopes, specials = [], []
+    gp_entries = [e for e in entries if e['kind'] != SPECIAL]
     for ev in events.values():
         status = 'closed' if ev['id'] in saved or now >= ev['ends'] else 'live' if now >= ev['starts'] else 'upcoming'
-        scopes.append({'key': f"event-{ev['id']}", 'type': 'event', 'event_id': ev['id'], 'name': ev['name'],
-                       'starts': ev['starts'], 'ends': ev['ends'], 'status': status,
-                       'saved_at': saved[ev['id']][0] if ev['id'] in saved else None,
-                       'boards': make_boards(teams, [e for e in entries if e['event_id'] == ev['id']], bonus=False)})
-    total = make_boards(teams, entries, bonus=True)
+        event_entries = [e for e in entries if e['event_id'] == ev['id']]
+        scope = {'key': f"event-{ev['id']}", 'type': 'special' if ev['kind'] == SPECIAL else 'event', 'event_id': ev['id'], 'name': ev['name'],
+                 'starts': ev['starts'], 'ends': ev['ends'], 'status': status,
+                 'saved_at': saved[ev['id']][0] if ev['id'] in saved else None,
+                 'boards': make_team_boards(teams, event_entries) if ev['kind'] == SPECIAL else make_boards(teams, event_entries, bonus=False)}
+        (specials if ev['kind'] == SPECIAL else scopes).append(scope)
+    total = make_boards(teams, gp_entries, bonus=True)
     scopes.append({'key': 'total', 'type': 'total', 'name': 'Grand Prix total', 'status': 'closed' if now >= END else 'live', 'boards': total})
+    scopes += specials
     live = [s for s in scopes if s['type'] == 'event' and s['status'] == 'live']
     closed = [s for s in scopes if s['type'] == 'event' and s['status'] == 'closed']
-    if now >= END:
+    started = [s for s in specials if s['status'] != 'upcoming']
+    live_specials = [s for s in specials if s['status'] == 'live']
+    if live_specials:
+        current = max(live_specials, key=lambda s: s['starts'])['key']
+    elif now >= END and started:
+        current = max(started, key=lambda s: s['starts'])['key']
+    elif now >= END:
         current = 'total'
     elif live:
         current = max(live, key=lambda s: s['starts'])['key']
@@ -404,11 +480,22 @@ def board(c):
 def read(admin=False):
     with storage.connection() as c:
         frozen = c.execute('SELECT frozen FROM race_config WHERE id=1').fetchone()[0]
-        if not frozen:
-            close_events(c)
-        result = json.loads(frozen) if frozen else board(c)
+        close_events(c)
+        result = board(c)
+        if frozen:
+            # The Grand Prix stays exactly as published; special events stay live.
+            final = json.loads(frozen)
+            gp_events = [e for e in final.get('events', []) if e.get('kind') != SPECIAL]
+            gp_ids = {e['id'] for e in gp_events}
+            live_specials = [s for s in result['scopes'] if s['type'] == SPECIAL]
+            final['scopes'] = [s for s in final.get('scopes', []) if s['type'] != SPECIAL] + live_specials
+            final['entries'] = [e for e in final.get('entries', []) if e['event_id'] in gp_ids] + [e for e in result['entries'] if e['kind'] == SPECIAL]
+            final['events'] = gp_events + [e for e in result['events'] if e['kind'] == SPECIAL]
+            if result['current_scope'] in {s['key'] for s in live_specials}:
+                final['current_scope'] = result['current_scope']
+            result = final
         if admin:
-            result['tracked_posts'] = [dict(r) for r in c.execute('SELECT p.id,p.url,p.label,p.title,p.remote_id,p.platform,e.id AS entry_id,t.name AS assigned_team,cr.name AS assigned_creator,e.creator_id AS assigned_creator_id,e.published_at AS assigned_published_at,ev.name AS assigned_event FROM posts p LEFT JOIN race_entries e ON e.post_id=p.id LEFT JOIN race_teams t ON t.id=e.team_id LEFT JOIN race_creators cr ON cr.id=e.creator_id LEFT JOIN race_events ev ON ev.id=e.event_id ORDER BY p.created_at DESC,p.id DESC')]
+            result['tracked_posts'] = [dict(r) for r in c.execute('SELECT p.id,p.url,p.label,p.title,p.remote_id,p.platform,e.id AS entry_id,t.name AS assigned_team,cr.name AS assigned_creator,e.creator_id AS assigned_creator_id,e.published_at AS assigned_published_at,ev.name AS assigned_event,ev.kind AS assigned_kind FROM posts p LEFT JOIN race_entries e ON e.post_id=p.id LEFT JOIN race_teams t ON t.id=e.team_id LEFT JOIN race_creators cr ON cr.id=e.creator_id LEFT JOIN race_events ev ON ev.id=e.event_id ORDER BY p.created_at DESC,p.id DESC')]
             result['available_events'] = [dict(r) for r in c.execute('SELECT ev.*, count(e.id) AS post_count, r.frozen_at AS saved_at FROM race_events ev LEFT JOIN race_entries e ON e.event_id=ev.id LEFT JOIN race_event_results r ON r.event_id=ev.id GROUP BY ev.id ORDER BY ev.starts,ev.id')]
             result['available_teams'] = teams_with_creators(c)
             result['audit'] = [dict(r) for r in c.execute('SELECT * FROM race_audit ORDER BY id DESC LIMIT 100')]
@@ -420,8 +507,20 @@ def mutate(action, p, actor, limit=100):
     with storage.connection() as c:
         c.execute('BEGIN IMMEDIATE')
         cfg = c.execute('SELECT * FROM race_config WHERE id=1').fetchone()
-        if cfg['frozen']:
-            raise ValueError('The final results are frozen.')
+        frozen = bool(cfg['frozen'])
+
+        def locked(what='this'):
+            """After the Grand Prix is published only special events (and creators) can change."""
+            if frozen:
+                raise ValueError(f'The Grand Prix results are frozen, so {what} can no longer change. Special events still can.')
+
+        def event_kind(event_id):
+            row = c.execute('SELECT kind FROM race_events WHERE id=?', (event_id,)).fetchone()
+            return row['kind'] if row else None
+
+        def entry_kind(entry_id):
+            row = c.execute('SELECT ev.kind FROM race_entries e JOIN race_events ev ON ev.id=e.event_id WHERE e.id=?', (entry_id,)).fetchone()
+            return row['kind'] if row else None
         if action in ('team', 'team-update'):
             team_id = integer(p.get('team_id')) if action == 'team-update' else None
             existing = c.execute('SELECT * FROM race_teams WHERE id=?', (team_id,)).fetchone() if team_id else None
@@ -449,6 +548,9 @@ def mutate(action, p, actor, limit=100):
             removed, unregistered = [], 0
             for platform in PLATFORMS:
                 for old in existing_creators[platform]:
+                    if old['id'] not in kept and frozen and c.execute(
+                            "SELECT 1 FROM race_entries e JOIN race_events ev ON ev.id=e.event_id WHERE e.creator_id=? AND ev.kind!='special'", (old['id'],)).fetchone():
+                        raise ValueError(f'{old["name"]} has posts in the published Grand Prix results and cannot be removed.')
                     if old['id'] not in kept:
                         unregistered += unregister(c, 'creator_id', old['id'])[0]
                         c.execute('DELETE FROM race_creators WHERE id=?', (old['id'],))
@@ -473,6 +575,10 @@ def mutate(action, p, actor, limit=100):
             existing = c.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
             if not existing:
                 raise ValueError('Already deleted. Reload the page.')
+            if action == 'team-delete':
+                locked('teams')
+            elif existing['kind'] != SPECIAL:
+                locked('Grand Prix events')
             entries, manual = unregister(c, column, record_id)
             if action == 'event-delete':
                 c.execute('DELETE FROM race_event_results WHERE event_id=?', (record_id,))
@@ -488,28 +594,44 @@ def mutate(action, p, actor, limit=100):
                               'LEFT JOIN race_events ev ON ev.id=e.event_id WHERE e.id=?', (integer(p.get('entry_id')),)).fetchone()
             if not entry:
                 raise ValueError('This post is no longer registered. Reload the page.')
+            if entry_kind(entry['id']) != SPECIAL:
+                locked('Grand Prix registrations')
             _, manual = unregister(c, 'id', entry['id'])
             p = {'unregistered': dict(entry), 'deleted_manual_observations': manual}
         elif action == 'base':
+            locked('base points')
             if not c.execute('UPDATE race_teams SET base_points=? WHERE id=?', (integer(p.get('base_points')), integer(p.get('team_id')))).rowcount:
                 raise ValueError('Team not found.')
         elif action in ('event', 'event-update'):
             starts, ends = timestamp(p.get('starts')), timestamp(p.get('ends'))
-            official = START <= starts < ends <= END
-            test_event = simulation_enabled() and starts < ends < START
-            if not (official or test_event):
-                raise ValueError('Official events must open and close between 28 Oct 18:00 and 8 Nov 23:59 KST, and close after they open. Test events before the race need RACE_SIMULATION=true on the server.')
-            event_name = name(p.get('name'))
+            kind = p.get('kind') or 'grand-prix'
+            if kind not in KINDS:
+                raise ValueError('Choose the event type: Grand Prix event or special event.')
             event_id = integer(p.get('event_id')) if action == 'event-update' else None
+            if kind == SPECIAL:
+                # Separate from the Grand Prix: any window after the race started.
+                if not START <= starts < ends:
+                    raise ValueError('A special event must open after 28 Oct 18:00 KST and close after it opens.')
+            else:
+                locked('Grand Prix events')
+                official = START <= starts < ends <= END
+                test_event = simulation_enabled() and starts < ends < START
+                if not (official or test_event):
+                    raise ValueError('Grand Prix events must open and close between 28 Oct 18:00 and 8 Nov 23:59 KST, and close after they open. For a later event choose "Special event". Test events before the race need RACE_SIMULATION=true on the server.')
+            if event_id is not None and event_kind(event_id) not in (None, SPECIAL):
+                locked('Grand Prix events')
+            event_name = name(p.get('name'))
             if c.execute('SELECT 1 FROM race_events WHERE name=? AND id!=?', (event_name, event_id or -1)).fetchone():
                 raise ValueError('An event with this name already exists. Choose a different name.')
             if event_id is None:
-                c.execute('INSERT INTO race_events(name,starts,ends) VALUES(?,?,?)', (event_name, starts, ends))
+                c.execute('INSERT INTO race_events(name,starts,ends,kind) VALUES(?,?,?,?)', (event_name, starts, ends, kind))
             else:
                 existing = c.execute('SELECT * FROM race_events WHERE id=?', (event_id,)).fetchone()
                 if not existing:
                     raise ValueError('Event not found. Reload the page.')
                 assigned = c.execute('SELECT count(*) FROM race_entries WHERE event_id=?', (event_id,)).fetchone()[0]
+                if assigned and existing['kind'] != kind:
+                    raise ValueError('An event with registered posts cannot change type. Unregister its posts first.')
                 if assigned and (existing['starts'] < START) != (starts < START):
                     raise ValueError('An event with assigned posts cannot switch between simulation and official competition.')
                 outside = c.execute('SELECT cr.name,e.platform,e.published_at FROM race_entries e LEFT JOIN race_creators cr ON cr.id=e.creator_id '
@@ -519,14 +641,14 @@ def mutate(action, p, actor, limit=100):
                     more = f' and {len(outside) - 5} more' if len(outside) > 5 else ''
                     raise ValueError(f'This window would leave out {len(outside)} registered post{"s" if len(outside) > 1 else ""}: {listed}{more}. '
                                      'Unregister them in Register first (you can register them again afterwards), or keep their publication times inside the window.')
-                c.execute('UPDATE race_events SET name=?,starts=?,ends=? WHERE id=?', (event_name, starts, ends, event_id))
-                if (existing['starts'], existing['ends']) != (starts, ends):
+                c.execute('UPDATE race_events SET name=?,starts=?,ends=?,kind=? WHERE id=?', (event_name, starts, ends, kind, event_id))
+                if (existing['starts'], existing['ends'], existing['kind']) != (starts, ends, kind):
                     # The window changed: the saved result is recalculated at the (new) close.
                     c.execute('DELETE FROM race_event_results WHERE event_id=?', (event_id,))
                     for (pid,) in c.execute('SELECT post_id FROM race_entries WHERE event_id=?', (event_id,)).fetchall():
                         due = post_next_check(c, pid, now)
                         c.execute('UPDATE posts SET next_check=? WHERE id=? AND paused=0', (due, pid))
-                p = {'event_id': event_id, 'before': dict(existing), 'after': {'name': event_name, 'starts': starts, 'ends': ends}}
+                p = {'event_id': event_id, 'before': dict(existing), 'after': {'name': event_name, 'starts': starts, 'ends': ends, 'kind': kind}}
 
         elif action in ('entry', 'register-post'):
             if action == 'register-post':
@@ -565,7 +687,10 @@ def mutate(action, p, actor, limit=100):
                 raise ValueError('Publication must be within the event window and cannot be in the future.')
             if ev['starts'] < START and not simulation_enabled():
                 raise ValueError('This is a simulation event. Enable RACE_SIMULATION before the race starts to add test posts.')
-            if c.execute('SELECT 1 FROM race_entries WHERE creator_id=? AND event_id=?', (creator['id'], event)).fetchone():
+            if ev['kind'] != SPECIAL:
+                locked('Grand Prix registrations')
+            # Grand Prix events: one post per creator. Special events: as many as they like.
+            if ev['kind'] != SPECIAL and c.execute('SELECT 1 FROM race_entries WHERE creator_id=? AND event_id=?', (creator['id'], event)).fetchone():
                 raise ValueError(f'{creator["name"]} already has a post for the selected event. Each creator counts one {label} post per event.')
             post = c.execute('SELECT id FROM posts WHERE platform=? AND remote_id=?', (target.platform, target.remote_id)).fetchone()
             if not post:
@@ -584,9 +709,11 @@ def mutate(action, p, actor, limit=100):
                 c.execute('DELETE FROM race_event_results WHERE event_id=?', (event,))
         elif action == 'manual':
             eid = integer(p.get('entry_id'))
-            entry = c.execute('SELECT * FROM race_entries WHERE id=?', (eid,)).fetchone()
+            entry = c.execute('SELECT e.*,ev.ends,ev.kind FROM race_entries e JOIN race_events ev ON ev.id=e.event_id WHERE e.id=?', (eid,)).fetchone()
             observed = timestamp(p.get('observed_at'))
-            if not entry or not entry['published_at'] <= observed <= min(now, END):
+            if entry and entry['kind'] != SPECIAL:
+                locked('Grand Prix counts')
+            if not entry or not entry['published_at'] <= observed <= min(now, event_cutoff(entry)):
                 raise ValueError('Observation must be after publication and no later than now or the race cutoff.')
             final = False  # superseded: each event's result is saved at its close
             counts = [integer(p.get(k), True) for k in METRICS]
@@ -597,6 +724,8 @@ def mutate(action, p, actor, limit=100):
             # A correction for a closed event updates its saved result.
             c.execute('DELETE FROM race_event_results WHERE event_id=(SELECT event_id FROM race_entries WHERE id=?) AND event_id IN (SELECT id FROM race_events WHERE ends<=?)', (eid, now))
         elif action == 'finalize':
+            if frozen:
+                raise ValueError('The Grand Prix results are already published.')
             if now < END:
                 raise ValueError('The race closes on 8 November at 23:59 KST. Results can be published after that.')
             close_events(c, now)

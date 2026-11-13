@@ -25,6 +25,8 @@ const alpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba($
 const fmt = n => new Intl.NumberFormat('en-GB').format(n);
 const dayFmt = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: 'numeric', month: 'short'});
 const day = s => dayFmt.format(new Date(s * 1000)).toUpperCase();
+const hmFmt = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+const hm = s => hmFmt.format(new Date(s * 1000));
 const snapshotFmt = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 
 function fit(ctx, text, maxWidth, size, weight, family = SANS, italic = false, min = 0.55) {
@@ -67,8 +69,10 @@ function facts(d, now) {
   const leaders = teams.filter(t => t.rank === 1 && t.score != null);
   const leader = leaders.length === 1 ? leaders[0] : null;
   const total = Math.ceil((d.end - d.start) / 86400);
+  const special = scope.type === 'special';
   let dayLabel, dayValue;
-  if (d.state === 'Final') { dayLabel = 'FINAL'; dayValue = 'RESULTS'; }
+  if (special) { dayLabel = ''; dayValue = scope.name.toUpperCase(); }
+  else if (d.state === 'Final') { dayLabel = 'FINAL'; dayValue = 'RESULTS'; }
   else if (now < d.start) { dayLabel = 'LIGHTS OUT'; dayValue = day(d.start); }
   else if (now > d.end) { dayLabel = 'RACE'; dayValue = 'CLOSED'; }
   else { dayLabel = ''; dayValue = 'GRAND PRIX'; }  // the event goes on the small line below
@@ -81,15 +85,18 @@ function facts(d, now) {
   else if (events.length) eventLine = 'All posting events closed';
   else eventLine = 'Posting events coming soon';
   if (scope.type === 'event') eventLine = scope.status === 'live' ? `${scope.name} — live until ${kst(scope.ends)} KST` : `${scope.name} — final result, closed ${kst(scope.ends)} KST`;
+  else if (special) eventLine = scope.status === 'live' ? `Special event — live until ${kst(scope.ends)} KST` : scope.status === 'upcoming' ? `Special event — opens ${kst(scope.starts)} KST` : `Special event — final result, closed ${kst(scope.ends)} KST`;
   else if (scope.type === 'total' && d.scopes) eventLine = `Grand Prix total — all events added up`;
   const observed = (d.entries || []).map(e => e.observed_at).filter(Boolean);
-  const status = scope.type === 'event' ? (scope.status === 'live' ? 'LIVE' : 'EVENT RESULT') : d.state === 'Final' ? 'FINAL RESULTS' : d.simulation ? 'SIMULATION' : now < d.start ? 'PRE-RACE' : now > d.end ? 'AWAITING FINAL CHECK' : 'PROVISIONAL';
+  const status = scope.type === 'event' || special ? (scope.status === 'live' ? 'LIVE' : 'EVENT RESULT') : d.state === 'Final' ? 'FINAL RESULTS' : d.simulation ? 'SIMULATION' : now < d.start ? 'PRE-RACE' : now > d.end ? 'AWAITING FINAL CHECK' : 'PROVISIONAL';
   const metric = ((d.metrics || {})[board] || (board === 'tiktok' ? 'views' : 'likes')).toUpperCase();
   const boardLabel = `${board === 'tiktok' ? 'TIKTOK' : 'INSTAGRAM'} · ${metric}`;
-  const scopeEntries = scope.type === 'event' ? (d.entries || []).filter(e => e.event_id === scope.event_id) : (d.entries || []);
+  const scopeEntries = scope.type === 'event' || special ? (d.entries || []).filter(e => e.event_id === scope.event_id) : (d.entries || []);
   const scopeObserved = scopeEntries.map(e => e.observed_at).filter(Boolean);
-  return {teams, leader, boardLabel, scopeType: scope.type, leaderWord: scope.type === 'event' && scope.status === 'closed' ? 'WINNER' : 'LEADER', total, dayLabel, dayValue, eventLine, status,
-    progress: Math.min(Math.max((now - d.start) / (d.end - d.start), 0), 1),
+  return {teams, leader, boardLabel, scopeType: scope.type, leaderWord: (scope.type === 'event' || special) && scope.status === 'closed' ? 'WINNER' : 'LEADER', total, dayLabel, dayValue, eventLine, status,
+    // Special events have their own window; everything else shows the Grand Prix.
+    barStart: special ? scope.starts : d.start, barEnd: special ? scope.ends : d.end,
+    progress: special ? Math.min(Math.max((now - scope.starts) / (scope.ends - scope.starts), 0), 1) : Math.min(Math.max((now - d.start) / (d.end - d.start), 0), 1),
     snapshot: snapshotFmt.format(new Date(now * 1000)).replace(',', '').toUpperCase(),
     asOf: scopeObserved.length ? `Counts as of ${kst(Math.max(...scopeObserved))} KST` : 'No counts yet'};
 }
@@ -274,8 +281,8 @@ function progress(ctx, W, L, accent, f, d) {
   const cell = 7 * s, fx = x + w - cell * 4, fy = y - cell * 4 - 10 * s;
   for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) { ctx.fillStyle = (r + c) % 2 ? '#08080a' : '#f4f4f6'; ctx.fillRect(fx + c * cell, fy + r * cell, cell, cell); }
   ctx.font = font(18 * s, 800); ctx.fillStyle = '#9a9aa6';
-  ctx.textAlign = 'left'; spaced(ctx, `${day(d.start)} · 18:00 KST`, x, y - 16 * s, 1.5 * s);
-  ctx.textAlign = 'right'; spaced(ctx, `${day(d.end)} · 23:59 KST`, x + w - cell * 4 - 14 * s, y - 16 * s, 1.5 * s, 'right');
+  ctx.textAlign = 'left'; spaced(ctx, `${day(f.barStart)} · ${hm(f.barStart)} KST`, x, y - 16 * s, 1.5 * s);
+  ctx.textAlign = 'right'; spaced(ctx, `${day(f.barEnd)} · ${hm(f.barEnd)} KST`, x + w - cell * 4 - 14 * s, y - 16 * s, 1.5 * s, 'right');
 }
 
 function footer(ctx, W, L, f) {
@@ -358,7 +365,7 @@ function syncScopes() {
   const scopes = (data.scopes || []).filter(s => s.type === 'total' || s.status !== 'upcoming');
   select.replaceChildren(...scopes.map(s => {
     const o = document.createElement('option'); o.value = s.key;
-    o.textContent = s.type === 'total' ? 'Grand Prix total' : `${s.name} · ${s.status === 'live' ? 'live' : 'final'}`;
+    o.textContent = s.type === 'total' ? 'Grand Prix total' : `${s.name}${s.type === 'special' ? ' (special, teams)' : ''} · ${s.status === 'live' ? 'live' : 'final'}`;
     return o;
   }));
   select.value = scopes.some(s => s.key === previous) ? previous : data.current_scope;

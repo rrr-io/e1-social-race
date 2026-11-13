@@ -520,3 +520,84 @@ class MultiCreators(unittest.TestCase):
         self.assertIn('MEOWCEDES', [r['team'] for r in data['boards'][TT]])
         with self.assertRaisesRegex(ValueError, 'has no Instagram creator'):
             race.mutate('entry', {'team_id': 3, 'event_id': 1, 'url': 'https://www.instagram.com/p/MEOW/', 'published_at': '2026-10-28T18:10'}, 'admin')
+
+
+class SpecialEvents(unittest.TestCase):
+    """Special events: separate from the Grand Prix, several posts per creator, team ranking."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old = storage.DB
+        storage.DB = self.temp.name + '/race.sqlite3'
+        storage.init()
+        self.now = race.START + 3600
+        self.clock = patch('time.time', side_effect=lambda: self.now)
+        self.clock.start()
+        race.mutate('team', {'name': 'ALPINOO', 'creators': {IG: [], TT: ['a1', 'a2']}}, 'admin')
+        race.mutate('team', {'name': 'HOONRARI', 'creators': {IG: [], TT: ['h1']}}, 'admin')
+        race.mutate('event', {'name': 'Opening', 'starts': '2026-10-28T18:00', 'ends': '2026-10-28T23:00'}, 'admin')
+        self.ids = {c['name']: c['id'] for t in race.read(admin=True)['available_teams'] for c in t['creators'][TT]}
+        self.n = 0
+
+    def tearDown(self):
+        self.clock.stop()
+        storage.DB = self.old
+        self.temp.cleanup()
+
+    def post(self, creator, event, published, views):
+        self.n += 1
+        race.mutate('entry', {'creator_id': self.ids[creator], 'event_id': event, 'url': f'https://www.tiktok.com/@x/video/{7000000000000000000 + self.n}', 'published_at': published}, 'admin')
+        entry_id = max(e['id'] for e in race.read()['entries'])
+        race.mutate('manual', {'entry_id': entry_id, 'observed_at': published, 'views': views, 'evidence': 'screenshot'}, 'admin')
+
+    def test_special_event_after_the_grand_prix(self):
+        with self.assertRaisesRegex(ValueError, 'Special event'):
+            race.mutate('event', {'name': 'Live Voting', 'starts': '2026-11-13T20:00', 'ends': '2026-11-20T18:00'}, 'admin')
+        race.mutate('event', {'name': 'Live Voting', 'kind': 'special', 'starts': '2026-11-13T20:00', 'ends': '2026-11-20T18:00'}, 'admin')
+        self.now = race.timestamp('2026-11-15T12:00')
+        self.post('a1', 2, '2026-11-14T10:00', 100)
+        self.post('a1', 2, '2026-11-15T10:00', 50)   # several posts per creator
+        self.post('a2', 2, '2026-11-14T11:00', 30)
+        self.post('h1', 2, '2026-11-13T21:00', 150)
+        data = race.read()
+        self.assertEqual(data['current_scope'], 'event-2')
+        special = next(s for s in data['scopes'] if s['key'] == 'event-2')
+        self.assertEqual(special['type'], 'special')
+        rows = special['boards'][TT]
+        self.assertEqual([(r['rank'], r['team'], r['score'], r['posts']) for r in rows], [(1, 'ALPINOO', 180, 3), (2, 'HOONRARI', 150, 1)])
+        self.assertEqual(rows[0]['creators'], ['a1', 'a2'])
+        self.assertIsNone(rows[0]['bonus_percent'])
+        total = next(s for s in data['scopes'] if s['key'] == 'total')
+        self.assertTrue(all(r['score'] is None for r in total['boards'][TT]))  # not part of the Grand Prix
+        # Collection keeps going until the special event closes, then stops.
+        with storage.connection() as c:
+            pid = c.execute('SELECT post_id FROM race_entries WHERE event_id=2 LIMIT 1').fetchone()[0]
+            self.assertLess(race.post_next_check(c, pid, self.now), race.timestamp('2026-11-20T18:00') + 1)
+            self.assertEqual(race.post_next_check(c, pid, race.timestamp('2026-11-21T00:00')), race.NEVER)
+
+    def test_grand_prix_keeps_one_post_per_creator(self):
+        self.post('a1', 1, '2026-10-28T18:10', 10)
+        with self.assertRaisesRegex(ValueError, 'already has a post'):
+            self.post('a1', 1, '2026-10-28T18:20', 10)
+
+    def test_special_event_runs_after_publishing(self):
+        self.post('a1', 1, '2026-10-28T18:10', 10)
+        self.post('h1', 1, '2026-10-28T18:10', 20)
+        self.now = race.END + 60
+        race.mutate('finalize', {}, 'admin')
+        with self.assertRaisesRegex(ValueError, 'frozen'):
+            race.mutate('event', {'name': 'Late GP', 'starts': '2026-11-01T00:00', 'ends': '2026-11-02T00:00'}, 'admin')
+        race.mutate('event', {'name': 'Live Voting', 'kind': 'special', 'starts': '2026-11-13T20:00', 'ends': '2026-11-20T18:00'}, 'admin')
+        race.mutate('team-update', {'team_id': 2, 'name': 'HOONRARI', 'creators': {IG: [], TT: [{'id': self.ids['h1'], 'name': 'h1'}, {'name': 'h2'}]}}, 'admin')
+        self.ids = {c['name']: c['id'] for t in race.read(admin=True)['available_teams'] for c in t['creators'][TT]}
+        self.now = race.timestamp('2026-11-14T12:00')
+        self.post('h2', 2, '2026-11-14T10:00', 500)
+        with self.assertRaisesRegex(ValueError, 'cannot be removed'):
+            race.mutate('team-update', {'team_id': 2, 'name': 'HOONRARI', 'creators': {IG: [], TT: [{'id': self.ids['h2'], 'name': 'h2'}]}}, 'admin')
+        data = race.read()
+        self.assertEqual(data['state'], 'Final')
+        self.assertEqual(data['current_scope'], 'event-2')
+        total = next(s for s in data['scopes'] if s['key'] == 'total')
+        self.assertEqual([r['score'] for r in total['boards'][TT] if r['score']], [20, 10])  # published Grand Prix unchanged
+        special = next(s for s in data['scopes'] if s['key'] == 'event-2')
+        self.assertEqual(special['boards'][TT][0]['team'], 'HOONRARI')
+        self.assertEqual(len(data['entries']), 3)

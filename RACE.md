@@ -106,6 +106,19 @@ Teams are picked from the fixed list of the six E1 teams (TEAM MCJAKEY, TEAM JAY
 
 Deleting asks for confirmation. It removes the pair or event, unregisters its official posts and deletes their manual observations; the tracked posts and their automatic snapshots remain in Track posts and can be registered again. The audit trail records what was deleted and how many posts were unregistered. Finalized results block all edits and deletions. API actions: `team-update`, `team-delete` (`team_id`) and `event-delete` (`event_id`).
 
+## Special events
+
+An event's **Type** is either *Grand Prix event* (the default, everything above) or *Special event*. A special event:
+
+- is separate from the Grand Prix: it is not part of the Grand Prix total or the podium bonuses, and it can run after 8 Nov (any window after 28 Oct 18:00 KST);
+- lets each creator register as many posts as they like inside the window, with no fixed day;
+- ranks **teams**: each team's score is the sum of the counts (TikTok views, Instagram likes) of every post of all its creators. The row lists the creators who posted and the number of posts;
+- is collected hourly until its close, then saved like any other event.
+
+It keeps working after **Freeze and publish final results**: the published Grand Prix stays exactly as it was, while special events can still be added, edited, deleted, and get posts, counts and unregistrations. Creators can be added to teams for a special event; creators with posts in the published Grand Prix cannot be removed. The public page and the Share tab show the special event as its own standings (current while it is live, and after it closes).
+
+API: `event` / `event-update` take `kind` (`grand-prix` or `special`). An event with registered posts cannot change type. Existing databases get the `kind` column and lose the one-post-per-creator database constraint on startup (Grand Prix events keep that rule in code).
+
 ## Unregistering a single post
 
 In **Register**, every registered post has an **Unregister** button. After a confirmation the post leaves its event and the standings, its manual observations are deleted, and it goes back to ordinary tracking (automatic snapshots are kept). It then shows up again as "To register" and can be registered with a different event, creator or publication time. Typical use: an event window has to change, but some posts would fall outside it. The event form names those posts; unregister them, save the new window, then register them again. API: `entry-delete` (`entry_id`); the audit trail records the removed registration.

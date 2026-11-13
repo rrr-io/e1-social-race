@@ -68,6 +68,10 @@ const metricOf = (data, platform) => (data.metrics || {})[platform] || (platform
 const publicPlatforms = data => admin ? PLATFORMS : PLATFORMS.filter(p => p !== 'instagram' || (data?.entries || []).some(e => e.platform === p));
 function rulesText(data) {
   const shown = publicPlatforms(data);
+  if (scopeOf(data).type === 'special') {
+    const used = PLATFORMS.filter(p => (scopeOf(data).boards?.[p] || []).some(r => r.posts));
+    return `Special event: every post of every creator counts. Teams are ranked by the total ${(used.length ? used : ['tiktok']).map(p => metricOf(data, p)).join(' / ')} of their posts.`;
+  }
   if (shown.length === 1) return `${PLATFORM_NAME[shown[0]]} ranks creators by ${metricOf(data, shown[0])}. The top three take the podium.`;
   return `Instagram ranks creators by likes, TikTok by views. Each leaderboard has its own podium.`;
 }
@@ -78,7 +82,9 @@ function renderHero(data) {
   if (!chip) return;
   const t = now();
   let kind = 'accent', label = 'Live · provisional', countdown;
-  if (data.state === 'Final') { kind = 'ok'; label = 'Final results'; countdown = data.finalized_at ? `Results published ${kst(data.finalized_at)} KST.` : 'Results are final.'; }
+  const liveSpecial = (data.events || []).filter(e => e.kind === 'special' && e.starts <= t && t < e.ends).sort((a, b) => a.ends - b.ends)[0];
+  if (liveSpecial) { kind = 'accent'; label = 'Special event · live'; countdown = `${liveSpecial.name} ends in ${duration(liveSpecial.ends - t)}`; }
+  else if (data.state === 'Final') { kind = 'ok'; label = 'Final results'; countdown = data.finalized_at ? `Results published ${kst(data.finalized_at)} KST.` : 'Results are final.'; }
   else if (data.simulation) { kind = 'warn'; label = 'Simulation · not official'; }
   if (!countdown) {
     if (t < data.start) { countdown = `Lights out in ${duration(data.start - t)}`; if (!data.simulation) label = 'Starting soon'; }
@@ -163,14 +169,16 @@ function renderScopes(data) {
     b.setAttribute('aria-pressed', String(scope.key === selectedScope));
     b.append(el('strong', null, scope.name));
     b.append(el('span', `scope-state ${scope.type === 'total' ? 'total' : scope.status}`,
-      scope.type === 'total' ? 'Sum of all events' : scope.status === 'live' ? 'Live' : 'Final'));
+      scope.type === 'total' ? 'Sum of all events' : `${scope.status === 'live' ? 'Live' : 'Final'}${scope.type === 'special' ? ' · special' : ''}`));
     b.addEventListener('click', () => { selectedScope = scope.key; renderScopes(data); renderStandings(data); });
     return b;
   }));
   bar.hidden = scopes.length < 2;
   const current = scopeOf(data), note = $('scope-note');
   if (note) {
-    note.textContent = current.type === 'total'
+    note.textContent = current.type === 'special'
+      ? `${current.name}: special event, separate from the Grand Prix. Every post counts; teams are ranked by the total of all their creators' posts. ${current.status === 'live' ? `Live until ${kst(current.ends)} KST.` : `Closed on ${kst(current.ends)} KST; result saved.`}`
+      : current.type === 'total'
       ? 'Grand Prix total: each creator\'s event results added up. This decides the bonus votes (P1 +2%, P2 and P3 +1%).'
       : current.status === 'live'
         ? `${current.name} is live until ${kst(current.ends)} KST. Its result is saved at the close and the next event starts from zero.`
@@ -232,7 +240,8 @@ function showBoardsWithPosts(data) {
     document.querySelectorAll('.board-tabs [data-board]').forEach(t => t.setAttribute('aria-selected', String(t.dataset.board === visible[0])));
   }
   const rules = $('rules');
-  if (rules && visible.length === 1 && available.length > 1) rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once it has posts${scopeOf(data).type === 'event' ? ' in this event' : ''}.`;
+  if (rules) rules.textContent = rulesText(data);
+  if (rules && visible.length === 1 && available.length > 1 && scopeOf(data).type !== 'special') rules.textContent = `${PLATFORM_NAME[visible[0]]} ranks creators by ${metricOf(data, visible[0])}. The ${PLATFORM_NAME[PLATFORMS.find(p => p !== visible[0])]} leaderboard appears once it has posts${scopeOf(data).type === 'event' ? ' in this event' : ''}.`;
 }
 
 // Standings: one timing tower per platform (public) or a table (admin) ----------------
@@ -429,7 +438,10 @@ function renderAdmin(data) {
   }
   if (!data.audit.length) audit.append(el('p', null, 'No changes recorded yet.'));
   renderChecklist(data, teams);
-  if (frozen) document.querySelectorAll('form[data-action] button').forEach(button => { button.disabled = true; });
+  document.querySelectorAll('form[data-action] button').forEach(button => { if (formLocked(button.closest('form'))) button.disabled = true; });
+  // After the Grand Prix is published only special events can be added or edited.
+  const gpOption = $('event-kind')?.querySelector('option[value="grand-prix"]');
+  if (gpOption) { gpOption.disabled = frozen; if (frozen && $('event-kind').value === 'grand-prix') { $('event-kind').value = 'special'; syncEventKind(); } }
 }
 
 function renderChecklist(data, teams) {
@@ -475,7 +487,8 @@ function renderRegistration(data) {
       if (post.assigned_published_at) card.append(el('p', 'field-hint', `Published ${kst(post.assigned_published_at)} KST`));
       // Unregister: the post leaves its event (e.g. to change the event window or fix the
       // assignment) and stays in Track posts, ready to be registered again.
-      const unregister = el('button', 'btn-ghost danger-text unregister', 'Unregister'); unregister.type = 'button'; unregister.disabled = frozen;
+      const unregister = el('button', 'btn-ghost danger-text unregister', 'Unregister'); unregister.type = 'button'; unregister.disabled = frozen && post.assigned_kind !== 'special';
+      if (unregister.disabled) unregister.dataset.locked = 'true';
       unregister.setAttribute('aria-label', `Unregister ${post.label || post.title || 'this post'} from ${post.assigned_event}`);
       unregister.addEventListener('click', () => removeRecord(unregister, 'entry-delete', {entry_id: post.entry_id},
         `Unregister this post from “${post.assigned_event}”?\n\nIt leaves the race and the event's standings, and its manual counts are deleted. It stays in Track posts with its history and can be registered again (also with a different event, creator or publication time).`,
@@ -493,7 +506,9 @@ function renderRegistration(data) {
         const blank = el("option", null, `Choose ${labelText.replace(/^\w/, c => c.toLowerCase())}`); blank.value = ''; input.prepend(blank); input.value = '';
         wrapper.append(input); form.append(wrapper); return input;
       };
-      const eventSelect = select('Event', 'event_id', data.events, e => `${e.starts < data.start ? '[TEST] ' : ''}${e.name}`);
+      // Once the Grand Prix is published only special events take new posts.
+      const openEvents = (data.events || []).filter(e => !frozen || e.kind === 'special');
+      const eventSelect = select('Event', 'event_id', openEvents, e => `${e.starts < data.start ? '[TEST] ' : ''}${e.name}${e.kind === 'special' ? ' (special)' : ''}`);
       // Every creator of this platform, grouped by team.
       const creatorLabel = el('label', null, `${PLATFORM_NAME[post.platform]} creator`);
       const creatorSelect = el('select'); creatorSelect.name = 'creator_id'; creatorSelect.required = true;
@@ -515,10 +530,10 @@ function renderRegistration(data) {
         published.setRange(selected && kstInput(selected.starts), selected && kstInput(selected.ends));
       });
       const save = el('button', null, 'Register post'); save.type = 'submit';
-      const blocked = !teams.some(t => creatorsOf(t, post.platform).length) || !data.events.length;
-      save.disabled = frozen || blocked; form.append(save);
+      const blocked = !teams.some(t => creatorsOf(t, post.platform).length) || !openEvents.length;
+      save.disabled = blocked; form.append(save);
       const message = el('p', 'form-message'); message.setAttribute('role', 'status'); form.append(message);
-      if (blocked) inlineMessage(message, 'info', `Create at least one event and one ${PLATFORM_NAME[post.platform]} creator in Setup first.`);
+      if (blocked) inlineMessage(message, 'info', frozen && !openEvents.length ? 'The Grand Prix is published. Add a special event in Setup to register new posts.' : `Create at least one event and one ${PLATFORM_NAME[post.platform]} creator in Setup first.`);
       card.append(form);
     }
     list.append(card);
@@ -580,12 +595,25 @@ function removedCreatorPosts(form, creators) {
   return `Remove ${gone.map(c => c.name).join(', ')} from ${team.name}?${posts ? `\n\n${posts === 1 ? '1 registered post' : `${posts} registered posts`} will leave the race. ${posts === 1 ? 'It stays' : 'They stay'} in Track posts with ${posts === 1 ? 'its' : 'their'} history and can be registered again.` : ''}`;
 }
 
+// Grand Prix vs special event: the hint explains what the type changes.
+function syncEventKind() {
+  const select = $('event-kind'), hint = $('event-kind-hint');
+  if (!select || !hint) return;
+  hint.textContent = select.value === 'special'
+    ? 'Separate from the Grand Prix, any dates after 28 Oct. Each creator can register several posts; teams are ranked by the sum of all their posts.'
+    : 'Grand Prix events fall between 28 Oct 18:00 and 8 Nov 23:59 KST and add up in the Grand Prix total. One post per creator.';
+}
+// When the Grand Prix is published its own forms stay locked; special events still work.
+const formLocked = form => frozen && ['finalize', 'base'].includes(form?.dataset.action);
+
 function resetEventForm() {
   const form = $('event-form');
   resetForm(form); form.dataset.action = 'event';
   $('event-form-title').textContent = 'Add posting event';
   $('save-event').textContent = 'Add event';
   $('cancel-event').hidden = true;
+  if (frozen && $('event-kind')) $('event-kind').value = 'special';
+  syncEventKind();
 }
 
 function resetTeamForm() {
@@ -604,11 +632,12 @@ function startEdit(form, focus) {
   focus.focus({preventScroll: true});
 }
 
-function rowActions(row, label, onEdit, onDelete) {
+function rowActions(row, label, onEdit, onDelete, lock = {edit: frozen, remove: frozen}) {
   const box = el('div', 'row-actions');
-  const edit = el('button', 'btn-ghost', 'Edit'); edit.type = 'button'; edit.disabled = frozen;
+  const edit = el('button', 'btn-ghost', 'Edit'); edit.type = 'button'; edit.disabled = lock.edit;
   edit.setAttribute('aria-label', `Edit ${label}`); edit.addEventListener('click', onEdit);
-  const remove = el('button', 'btn-ghost danger-text', 'Delete'); remove.type = 'button'; remove.disabled = frozen;
+  const remove = el('button', 'btn-ghost danger-text', 'Delete'); remove.type = 'button'; remove.disabled = lock.remove;
+  if (lock.remove) remove.dataset.locked = 'true';
   remove.setAttribute('aria-label', `Delete ${label}`); remove.addEventListener('click', () => onDelete(remove));
   box.append(edit, remove);
   cell(row, '', 'actions-cell').append(box);
@@ -627,7 +656,7 @@ async function removeRecord(button, action, payload, confirmText, done, busyText
     toast('error', problem.title === 'Something went wrong' ? (action === 'entry-delete' ? 'Could not unregister' : 'Could not delete') : problem.title, problem.message);
   } finally {
     busy(button, false);
-    if (button.isConnected) button.disabled = frozen;
+    if (button.isConnected) button.disabled = button.dataset.locked === 'true';
   }
 }
 
@@ -639,7 +668,7 @@ function renderEvents(data) {
   for (const item of events) {
     const row = el('tr');
     cell(row, item.name);
-    const typeCell = cell(row, ''); typeCell.append(el('span', item.starts < data.start ? 'chip warn' : 'chip ok', item.starts < data.start ? 'Simulation' : 'Official'));
+    const typeCell = cell(row, ''); typeCell.append(item.kind === 'special' ? el('span', 'chip accent', 'Special') : el('span', item.starts < data.start ? 'chip warn' : 'chip ok', item.starts < data.start ? 'Simulation' : 'Grand Prix'));
     cell(row, kst(item.starts)); cell(row, kst(item.ends)); cell(row, fmt(item.post_count));
     const t = Date.now() / 1000;
     const resultCell = cell(row, '');
@@ -653,13 +682,15 @@ function renderEvents(data) {
       // The pickers always show KST, whatever the administrator's timezone.
       form.elements.starts.setValue(kstInput(item.starts));
       form.elements.ends.setValue(kstInput(item.ends));
+      form.elements.kind.value = item.kind || 'grand-prix'; syncEventKind();
       $('event-form-title').textContent = `Edit “${item.name}”`;
       $('save-event').textContent = 'Save changes';
       $('cancel-event').hidden = false;
       startEdit(form, form.elements.namedItem('name'));
     }, button => removeRecord(button, 'event-delete', {event_id: item.id},
       `Delete the event “${item.name}”?${postsNote(item.post_count)}`,
-      ['Event deleted', `“${item.name}” was removed${item.post_count ? ` and ${item.post_count} ${item.post_count === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
+      ['Event deleted', `“${item.name}” was removed${item.post_count ? ` and ${item.post_count} ${item.post_count === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]),
+      {edit: frozen && item.kind !== 'special', remove: frozen && item.kind !== 'special'});
     list.append(row);
   }
   if (!events.length) emptyRow(list, 'No events yet. Add your first event with the form below.', 7);
@@ -694,7 +725,8 @@ function renderSetupTeams(data, teams) {
       startEdit(form, form.querySelector('.creator-row input'));
     }, button => removeRecord(button, 'team-delete', {team_id: team.id},
       `Delete ${who} and its ${creatorCount} ${creatorCount === 1 ? 'creator' : 'creators'}?${postsNote(registered)}`,
-      ['Team deleted', `${who} was removed${registered ? ` and ${registered} ${registered === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]));
+      ['Team deleted', `${who} was removed${registered ? ` and ${registered} ${registered === 1 ? 'post was' : 'posts were'} unregistered` : ''}.`]),
+      {edit: false, remove: frozen});  // creators can still be added for special events
     body.append(row);
   }
   if (!teams.length) emptyRow(body, 'No teams yet. Pick a team and add its creators with the form below.', 5);
@@ -754,6 +786,7 @@ function validate(form) {
 
 if (admin) {
   document.querySelectorAll('[data-datetime]').forEach(slot => slot.replaceWith(dateTimeField(slot.dataset.label, slot.dataset.datetime, slot.dataset.hint)));
+  $('event-kind')?.addEventListener('change', syncEventKind);
   $('cancel-event').addEventListener('click', () => { resetEventForm(); inlineMessage($('event-form').querySelector('.form-message'), 'info', ''); });
   $('cancel-team').addEventListener('click', () => { resetTeamForm(); inlineMessage($('team-form').querySelector('.form-message'), 'info', ''); });
   setCreators($('team-form'), null);
@@ -801,7 +834,7 @@ if (admin) {
       if (problem.status === 401) toast('error', problem.title, problem.message);
     } finally {
       busy(button, false);
-      if (button) button.disabled = frozen;
+      if (button) button.disabled = formLocked(form);
     }
   });
   document.addEventListener('posts-changed', () => refresh());
