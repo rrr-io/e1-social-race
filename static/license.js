@@ -149,6 +149,13 @@ const AWARDS = [   // 2026 MAMA Awards, Kyocera Dome Osaka
   ['Favorite MCD Stage', 'WITH MNET PLUS'],
   ["Fans' Choice of the Year", 'GRAND PRIZE · DAESANG · WITH VISA', 'grand'],
 ];
+// Finishes the user can choose: the moving foil in 3D and a still version for the PNG.
+const FINISHES = {
+  holo: {mode: 0, strength: .5, pngAlpha: .3, png: [[.18, 'rgba(0,0,0,0)'], [.3, '#ff4fd855'], [.38, '#ffd76a55'], [.46, '#5dffc255'], [.54, '#55c8ff55'], [.62, '#b07cff55'], [.74, 'rgba(0,0,0,0)']]},
+  prism: {mode: 1, strength: .6, pngAlpha: .35, png: [[.1, 'rgba(0,0,0,0)'], [.25, '#7cf7ff44'], [.4, '#ff7cf544'], [.55, '#fff37c44'], [.7, '#7cff9a44'], [.85, 'rgba(0,0,0,0)']]},
+  gold: {mode: 2, strength: .55, pngAlpha: .35, png: [[.2, 'rgba(0,0,0,0)'], [.38, '#ffd98066'], [.48, '#fff4c866'], [.58, '#e3b44a66'], [.76, 'rgba(0,0,0,0)']]},
+  matte: {mode: 3, strength: .25, pngAlpha: 0, png: []},
+};
 const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 function passBase(ctx, c) {
   roundRect(ctx, 0, 0, PW, PH, PRADIUS); ctx.clip();
@@ -160,17 +167,81 @@ function passBase(ctx, c) {
     g.addColorStop(0, hexA(c, a)); g.addColorStop(1, hexA(c, 0));
     ctx.fillStyle = g; ctx.fillRect(0, 0, PW, PH);
   }
-  ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 1.5;
-  for (let i = 0; i < 36; i++) { const a = i / 36 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(PW * .85, PH * .3); ctx.lineTo(PW * .85 + Math.cos(a) * 2000, PH * .3 + Math.sin(a) * 2000); ctx.stroke(); }
+  certificateTexture(ctx, c);
   // Slot for the lanyard.
   roundRect(ctx, PW / 2 - 75, 26, 150, 22, 11); ctx.fillStyle = '#000'; ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 2; ctx.stroke();
 }
+// Security-print texture: paper grain, a guilloche frame with microtext, like a real certificate.
+let grain = null;
+function grainPattern(ctx) {
+  if (!grain) {
+    const g = document.createElement('canvas'); g.width = g.height = 256;
+    const gx = g.getContext('2d'), img = gx.createImageData(256, 256);
+    let seed = 7;
+    for (let i = 0; i < img.data.length; i += 4) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const v = seed >>> 24; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255;
+    }
+    gx.putImageData(img, 0, 0); grain = g;
+  }
+  return ctx.createPattern(grain, 'repeat');
+}
+function guillocheBand(ctx, x, y, w, h, color, waves, phase) {
+  // Interlaced sine ribbons along a straight band.
+  ctx.strokeStyle = color; ctx.lineWidth = .9;
+  const horizontal = w > h, len = horizontal ? w : h, depth = horizontal ? h : w;
+  for (let k = 0; k < 6; k++) {
+    ctx.beginPath();
+    for (let t = 0; t <= len; t += 2) {
+      const off = depth / 2 + Math.sin(t / len * Math.PI * 2 * waves + k * Math.PI / 3 + phase) * depth * .42;
+      const px = horizontal ? x + t : x + off, py = horizontal ? y + off : y + t;
+      t ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.stroke();
+  }
+}
+function certificateTexture(ctx, c) {
+  // Paper grain.
+  ctx.save(); ctx.globalAlpha = .05; ctx.globalCompositeOperation = 'overlay';
+  ctx.fillStyle = grainPattern(ctx); ctx.scale(.5, .5); ctx.fillRect(0, 0, PW * 2, PH * 2); ctx.restore();
+  // Guilloche frame and microtext.
+  const m = 18, b = 16;
+  ctx.save();
+  guillocheBand(ctx, m + b, m, PW - 2 * (m + b), b, hexA(c, .28), 26, 0);
+  guillocheBand(ctx, m + b, PH - m - b, PW - 2 * (m + b), b, hexA(c, .28), 26, 1);
+  guillocheBand(ctx, m, m + b, b, PH - 2 * (m + b), hexA(c, .28), 38, .5);
+  guillocheBand(ctx, PW - m - b, m + b, b, PH - 2 * (m + b), hexA(c, .28), 38, 1.5);
+  roundRect(ctx, m + b + 6, m + b + 6, PW - 2 * (m + b + 6), PH - 2 * (m + b + 6), 26); ctx.strokeStyle = hexA(c, .25); ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.16)'; ctx.font = font(7, 700);
+  const micro = 'ENHYPEN MAMA GRAND PRIX 2026 · SIX TEAMS ONE ENHYPEN · ';
+  let line = ''; while (ctx.measureText(line).width < PW) line += micro;
+  ctx.fillText(line, m + b + 14, PH - m - b - 10);
+  ctx.restore();
+}
+function seal(ctx, x, y, r, c) {
+  // Embossed rosette seal.
+  ctx.save(); ctx.translate(x, y);
+  const g = ctx.createRadialGradient(-r * .3, -r * .3, 0, 0, 0, r);
+  g.addColorStop(0, hexA(c, .55)); g.addColorStop(1, hexA(c, .18));
+  ctx.beginPath();
+  for (let i = 0; i <= 64; i++) { const a = i / 64 * Math.PI * 2, rr = r * (i % 2 ? .93 : 1); ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = .8;
+  for (let k = 0; k < 18; k++) { ctx.beginPath(); for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, rr = r * .72 + Math.sin(a * 9 + k * .35) * r * .12; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.stroke(); }
+  ctx.beginPath(); ctx.arc(0, 0, r * .5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(10,10,14,.75)'; ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = font(r * .36, 900); ctx.fillText('E1', 0, -r * .05);
+  ctx.font = font(r * .13, 700); ctx.fillText('2026', 0, r * .27);
+  ctx.restore();
+}
 function passFoil(ctx) {
   // A still holographic band for the downloaded image (the 3D view has a moving one).
-  ctx.save(); ctx.globalCompositeOperation = 'color-dodge'; ctx.globalAlpha = .3;
+  const finish = FINISHES[form.elements.finish?.value] || FINISHES.holo;
+  if (!finish.png.length) return;
+  ctx.save(); ctx.globalCompositeOperation = 'color-dodge'; ctx.globalAlpha = finish.pngAlpha;
   const g = ctx.createLinearGradient(0, PH * .15, PW, PH * .6);
-  [[.18, 'rgba(0,0,0,0)'], [.3, '#ff4fd855'], [.38, '#ffd76a55'], [.46, '#5dffc255'], [.54, '#55c8ff55'], [.62, '#b07cff55'], [.74, 'rgba(0,0,0,0)']].forEach(([o, col]) => g.addColorStop(o, col));
+  finish.png.forEach(([o, col]) => g.addColorStop(o, col));
   ctx.fillStyle = g; ctx.fillRect(0, 0, PW, PH); ctx.restore();
 }
 function passEdge(ctx, c) {
@@ -196,12 +267,7 @@ function drawPassFront(ctx, v) {
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = c; ctx.fillRect(56, 98, 44, 6);
   ctx.fillStyle = '#d4d5db'; ctx.font = font(22, 700); spaced(ctx, 'ENHYPEN MAMA GRAND PRIX', 116, 108, 4);
-  if (v.team) {
-    const tag = v.team.member.toUpperCase();
-    ctx.font = `italic ${font(22, 900)}`; const w = ctx.measureText(tag).width + 36;
-    roundRect(ctx, PW - 56 - w, 82, w, 40, 20); ctx.fillStyle = c; ctx.fill();
-    ctx.fillStyle = '#111'; ctx.fillText(tag, PW - 56 - w + 18, 110);
-  }
+  if (logo.complete && logo.naturalWidth) { const h = 62, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, PW - 64 - w, 150, w, h); }
   ctx.fillStyle = '#9a9ca6'; ctx.font = font(30, 600); spaced(ctx, 'CERTIFICATE OF', 56, 176, 6);
   ctx.fillStyle = '#fff'; ctx.font = font(62, 700); ctx.fillText('PARTICIPATION', 54, 236);
   // Clear sleeve with the crew licence.
@@ -238,6 +304,7 @@ function drawPassFront(ctx, v) {
   let bx = PW - 356, seed = [...no].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0;
   ctx.fillStyle = '#e8e8ee';
   while (bx < PW - 60) { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; const w = 2 + (seed % 3) * 2; ctx.fillRect(bx, PH - 124, w, 72); bx += w + 3 + ((seed >>> 8) % 3) * 2; }
+  seal(ctx, 416, PH - 90, 42, c);
   passFoil(ctx); ctx.restore(); passEdge(ctx, c);
 }
 function trophy(ctx, x, y, s, color) {
@@ -256,22 +323,27 @@ function drawPassBack(ctx, v) {
   ctx.fillStyle = c; ctx.fillRect(PW / 2 - 30, 492, 60, 6);
   ctx.fillStyle = '#d4d5db'; ctx.font = font(24, 700); w = [...'2026 MAMA AWARDS'].reduce((a, ch) => a + ctx.measureText(ch).width + 6, -6); spaced(ctx, '2026 MAMA AWARDS', (PW - w) / 2, 556, 6);
   ctx.fillStyle = '#8d8f99'; ctx.font = font(20, 700); w = [...'KYOCERA DOME OSAKA'].reduce((a, ch) => a + ctx.measureText(ch).width + 4, -4); spaced(ctx, 'KYOCERA DOME OSAKA', (PW - w) / 2, 590, 4);
-  AWARDS.forEach(([title, sub, grand], i) => {
-    const x = 56, y = 630 + i * 136, bw = PW - 112, bh = 116;
-    roundRect(ctx, x, y, bw, bh, 20);
-    ctx.fillStyle = grand ? 'rgba(227,180,74,.16)' : 'rgba(255,255,255,.05)'; ctx.fill();
-    ctx.strokeStyle = grand ? 'rgba(227,180,74,.6)' : 'rgba(255,255,255,.11)'; ctx.lineWidth = 2; ctx.stroke();
-    const cx = x + 62, cy = y + bh / 2;
-    ctx.beginPath(); ctx.arc(cx, cy, 34, 0, Math.PI * 2);
-    if (grand) { const g = ctx.createLinearGradient(cx - 34, cy - 34, cx + 34, cy + 34); g.addColorStop(0, '#ffe28a'); g.addColorStop(1, '#c9962c'); ctx.fillStyle = g; ctx.fill(); }
-    else { ctx.fillStyle = hexA(c, .16); ctx.fill(); ctx.strokeStyle = hexA(c, .6); ctx.stroke(); }
-    trophy(ctx, cx, cy + 1, 36, grand ? '#3a2a00' : c);
-    ctx.fillStyle = '#fff'; ctx.font = font(30, 700); ctx.fillText(title, x + 124, y + 52);
-    ctx.fillStyle = '#a9abb4'; ctx.font = font(20, 700); spaced(ctx, sub, x + 124, y + 84, 3);
+  // Awards as an engraved plaque: hairline dividers, the Daesang last in gold foil.
+  ctx.textAlign = 'center';
+  const gold = ctx.createLinearGradient(PW / 2 - 260, 0, PW / 2 + 260, 0);
+  gold.addColorStop(0, '#b8862b'); gold.addColorStop(.35, '#ffe9a8'); gold.addColorStop(.6, '#e3b44a'); gold.addColorStop(1, '#a8771f');
+  const rows = [[650, 0], [770, 1], [910, 2]];
+  rows.forEach(([y, i]) => {
+    const [title, sub, grand] = AWARDS[i];
+    if (i) { // divider: line · diamond · line
+      ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(PW / 2 - 150, y - 58); ctx.lineTo(PW / 2 - 14, y - 58); ctx.moveTo(PW / 2 + 14, y - 58); ctx.lineTo(PW / 2 + 150, y - 58); ctx.stroke();
+      ctx.save(); ctx.translate(PW / 2, y - 58); ctx.rotate(Math.PI / 4); ctx.fillStyle = grand ? '#e3b44a' : c; ctx.fillRect(-5, -5, 10, 10); ctx.restore();
+    }
+    ctx.fillStyle = grand ? '#e3b44a' : c; ctx.font = font(18, 700);
+    const sw = [...sub].reduce((a, ch) => a + ctx.measureText(ch).width + 4, -4);
+    ctx.textAlign = 'left'; spaced(ctx, sub, (PW - sw) / 2, y, 4); ctx.textAlign = 'center';
+    ctx.fillStyle = grand ? gold : '#fff'; ctx.font = font(grand ? 52 : 38, 700);
+    ctx.fillText(grand ? title.toUpperCase() : title, PW / 2, y + (grand ? 58 : 46));
   });
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#d4d5db'; ctx.font = font(34, 400); ctx.fillText('We crossed the line together.', PW / 2, 1098);
-  ctx.fillStyle = '#fff'; ctx.font = font(34, 700); ctx.fillText('Six teams. One ENHYPEN.', PW / 2, 1144);
+  ctx.fillStyle = '#d4d5db'; ctx.font = font(32, 400); ctx.fillText('We crossed the line together.', PW / 2, 1080);
+  ctx.fillStyle = '#fff'; ctx.font = font(32, 700); ctx.fillText('Six teams. One ENHYPEN.', PW / 2, 1124);
   ctx.textAlign = 'left';
   passFoil(ctx); ctx.restore(); passEdge(ctx, c);
 }
@@ -350,18 +422,34 @@ function createView() {
   // Holographic foil: a rainbow that moves with the viewing angle.
   const holo = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: {uStrength: {value: .35}, uTime: {value: 0}},
+    uniforms: {uStrength: {value: .5}, uTime: {value: 0}, uMode: {value: 0}},
     vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
       void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform float uStrength; uniform float uTime; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+    fragmentShader: `uniform float uStrength; uniform float uTime; uniform int uMode; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
       vec3 rainbow(float t){ return .5 + .5 * cos(6.28318 * (t + vec3(0.0, .33, .67))); }
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       void main(){
         float f = dot(vN, vV);
-        float t = vUv.x * .9 + vUv.y * .45 + (1.0 - f) * 3.2 + vN.x * 1.5 - vN.y * 1.2;
-        float band = smoothstep(.0, .6, sin(t * 6.28318 * .8) * .5 + .5);
-        float rim = pow(1.0 - f, 1.4);
-        float a = uStrength * (.18 + .82 * rim) * (.45 + .55 * band);
-        gl_FragColor = vec4(rainbow(t) * a, a);
+        vec2 tilt = vec2(vV.x - vN.x, vV.y - vN.y);
+        float rim = pow(1.0 - f, 1.3);
+        vec3 col; float a;
+        if (uMode == 0) {          // holographic: rainbow bands + glitter that twinkles with the angle
+          float t = vUv.x * .8 + vUv.y * .5 + tilt.x * 2.6 - tilt.y * 2.0;
+          float band = smoothstep(.15, .85, sin(t * 6.28318 * .9) * .5 + .5);
+          vec2 cell = floor(vUv * vec2(160.0, 234.0));
+          float sp = step(.985, hash(cell)) * pow(max(0.0, sin(hash(cell + 3.1) * 40.0 + tilt.x * 30.0 + tilt.y * 22.0)), 8.0);
+          col = rainbow(t) ; a = uStrength * ((.15 + .85 * rim) * (.35 + .65 * band)) + sp * .9;
+        } else if (uMode == 1) {   // prism: fine diffraction grating split into spectra
+          float g = sin((vUv.x + vUv.y) * 900.0) * .5 + .5;
+          float t = (vUv.x - vUv.y) * 1.5 + tilt.x * 4.0 + tilt.y * 3.0;
+          col = rainbow(t + g * .15); a = uStrength * (.25 + .75 * rim) * (.4 + .6 * g) * smoothstep(.0, .5, abs(sin(t * 3.14159)));
+        } else if (uMode == 2) {   // gold foil: a warm specular sweep
+          float s = exp(-pow((vUv.x * .7 + vUv.y * .5 - .6 - tilt.x * 1.6 + tilt.y * 1.2) * 4.0, 2.0));
+          col = mix(vec3(.89, .70, .29), vec3(1.0, .95, .78), s); a = uStrength * (.12 + .88 * s);
+        } else {                   // matte: only a soft sheen
+          float s = exp(-pow((vUv.x - .5 - tilt.x * 1.5) * 3.0, 2.0)); col = vec3(1.0); a = uStrength * .35 * s;
+        }
+        gl_FragColor = vec4(col * a, a);
       }`,
   });
   const holoMesh = new THREE.Mesh(face, holo); holoMesh.position.z = D / 2 + .0012; card.add(holoMesh);
@@ -421,8 +509,9 @@ function createView() {
     update(v) {
       frontTex.needsUpdate = true; backTex.needsUpdate = true;
       // Foil: subtle on the ladder, stronger on prestige levels; light designs need less to stay readable.
-      const dark = v.level && INK[code(v.level)][2] === 'dark';
-      holo.uniforms.uStrength.value = !v.level ? .25 : (v.level.tier === 'star' ? .55 : v.level.tier === 'flag' ? .4 : .22) * (dark ? 1 : .55);
+      const finish = FINISHES[form.elements.finish?.value] || FINISHES.holo;
+      holo.uniforms.uMode.value = finish.mode;
+      holo.uniforms.uStrength.value = finish.strength * (v.level?.tier === 'star' ? 1.15 : 1);
     },
     flip() { state.base += Math.PI; state.try += Math.PI; state.last = performance.now(); },
     setMotion(m) { state.motion = m; },
