@@ -16,7 +16,7 @@ const TEAMS = {
   hoonrari: {name: 'Hoonrari', member: 'Team Sunghoon', color: '#ff4b4b'},
   alpinoo: {name: 'Alpinoo', member: 'Team Sunoo', color: '#ff7eb6'},
   meowcedes: {name: 'Meowcedes', member: 'Team Jungwon', color: '#2ee6c5'},
-  rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#4cd964'},
+  rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#13804f'},   // bottle green
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
 };
 const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
@@ -671,7 +671,7 @@ function videoType() {
 }
 // Video formats: the spin is framed for where it will be posted.
 const FORMATS = {
-  story: {w: 1080, h: 1920, fill: .6, label: 'Story · Reel · TikTok'},
+  story: {w: 1080, h: 1920, fill: .5, label: 'Story · Reel · TikTok'},
   post: {w: 1080, h: 1350, fill: .745, label: 'Instagram post'},
   square: {w: 1080, h: 1080, fill: .7, label: 'X post'},
 };
@@ -695,12 +695,13 @@ function videoBackground(v, f) {
   const who = `${v.username} · ${teamLabel(v.team, ' · ')}`;
   if (f === FORMATS.story) {
     // Top and bottom bands, clear of the platform UI.
-    if (logo.complete && logo.naturalWidth) { const lh = 70, lw = lh * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, mid - lw / 2, 150, lw, lh); }
-    label('ENHYPEN MAMA GRAND PRIX 2026', 290, 30, 700, '#d4d5db', 5);
-    label('CERTIFICATE OF PARTICIPATION', 340, 26, 600, '#9a9ca6', 6);
-    label(v.username, 1610, 64, 700, '#fff');
-    label(`${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1666, 32, 600, col);
-    label('Different Colors. Same finish line.', 1730, 28, 400, '#c9cad0');
+    // Text stays inside the platforms' safe area; the card sits between, with room to breathe.
+    if (logo.complete && logo.naturalWidth) { const lh = 58, lw = lh * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, mid - lw / 2, 236, lw, lh); }
+    label('ENHYPEN MAMA GRAND PRIX 2026', 350, 30, 700, '#d4d5db', 5);
+    label('CERTIFICATE OF PARTICIPATION', 394, 24, 600, '#9a9ca6', 6);
+    label(v.username, 1532, 60, 700, '#fff');
+    label(`${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1584, 30, 600, col);
+    label('Different Colors. Same finish line.', 1636, 26, 400, '#c9cad0');
   } else if (f === FORMATS.square) {
     label(who, h - 64, 30, 700, '#fff');
     label('ENHYPEN MAMA GRAND PRIX 2026', 64, 24, 700, '#9a9ca6', 5);
@@ -769,7 +770,7 @@ shareBox?.addEventListener('click', async e => {
   if (shared?.button === button) {
     const file = new File([shared.blob], `emgp26-certificate-${slug(v)}-${button.dataset.format}.${shared.ext}`, {type: shared.blob.type});
     if (navigator.canShare?.({files: [file]})) {
-      try { await navigator.share({files: [file], title: 'My EMGP26 certificate', text: 'Different Colors. Same finish line. #ENHYPEN #EMGP26'}); }
+      try { await navigator.share({files: [file], title: 'My EMGP26 certificate', text: 'I raced for ENHYPEN during ENHYPEN MAMA Grand Prix to bring home the Daesang. #EMGP2026 #ENHYPEN'}); }
       catch (err) { if (err?.name !== 'AbortError') { download(shared.blob, file.name); toast('info', 'Saved instead', 'Sharing was not possible, the video is in your downloads.'); } }
     } else {
       download(shared.blob, file.name);

@@ -68,7 +68,7 @@ body{margin:0;min-height:100vh;font-family:var(--lic-font);color:#f4f4f6;backgro
 .lic-get{display:none}
 
 /* Embed mode (/crew-license/embed): only the card */
-html:has(body.embed),body.embed{background:transparent!important;min-height:0}
+html:has(body.embed),body.embed{background:transparent!important;min-height:0;color-scheme:normal!important}
 body.embed .lic-top,body.embed .lic-intro,body.embed .lic-form,body.embed .lic-footer,body.embed .lic-stage figcaption,body.embed .lic-tilt{display:none}
 body.embed .lic-main{padding:0;max-width:none}
 body.embed .lic-layout{display:block}
