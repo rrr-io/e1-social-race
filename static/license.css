@@ -1,0 +1,45 @@
+/* Crew licence (/crew-license): form + 3D card. Fonts are served locally (CSP allows 'self' only). */
+@font-face{font-family:"Titillium Web";src:url(/fonts/titillium-web-latin-400-normal.woff2) format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"Titillium Web";src:url(/fonts/titillium-web-latin-600-normal.woff2) format("woff2");font-weight:600;font-display:swap}
+@font-face{font-family:"Titillium Web";src:url(/fonts/titillium-web-latin-700-normal.woff2) format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"Titillium Web";src:url(/fonts/titillium-web-latin-900-normal.woff2) format("woff2");font-weight:900;font-display:swap}
+*{box-sizing:border-box}
+:root{--red:#e10600;--lic-font:"Titillium Web",system-ui,sans-serif}
+body{margin:0;min-height:100vh;font-family:var(--lic-font);color:#f4f4f6;background:radial-gradient(1100px 600px at 75% -10%,#1d2026,transparent 60%),#0b0c0f}
+.lic-top{display:flex;justify-content:space-between;align-items:center;gap:12px;max-width:1180px;margin:auto;padding:22px 24px}
+.lic-brand{display:flex;align-items:center;gap:14px;font-weight:700;letter-spacing:.3px}
+.lic-brand i{width:34px;height:4px;background:var(--red)}
+.lic-tag{font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#8d8f99}
+.lic-main{max-width:1180px;margin:auto;padding:4px 24px 40px}
+.lic-intro h1{margin:6px 0 6px;font-size:clamp(32px,5vw,52px);font-weight:700;letter-spacing:.5px;text-transform:uppercase;line-height:1}
+.lic-intro p{margin:0 0 28px;max-width:640px;color:#a9abb4;line-height:1.55;font-size:17px}
+.lic-layout{display:grid;grid-template-columns:minmax(260px,360px) minmax(0,1fr);gap:36px;align-items:start}
+
+.lic-form{background:#14161b;border:1px solid #262932;border-radius:16px;padding:22px}
+.lic-form label{display:block;margin:0 0 18px;font-size:14px;font-weight:600;color:#a9abb4}
+.lic-form input,.lic-form select{display:block;width:100%;margin-top:6px;font:inherit;font-size:17px;color:#f4f4f6;background:#0b0c0f;border:1px solid #333744;border-radius:10px;padding:0 12px;min-height:48px}
+.lic-form input:focus,.lic-form select:focus{border-color:var(--red);outline:none;box-shadow:0 0 0 3px #e1060033}
+.field-hint{display:block;font-size:12.5px;font-weight:400;color:#7d808a;margin-top:6px;line-height:1.5}
+.form-message{margin:0 0 12px}
+.lic-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lic-actions button,.lic-tilt{font:inherit;font-size:15px;font-weight:700;min-height:48px;padding:0 14px;border-radius:10px;cursor:pointer;border:1px solid var(--red);background:var(--red);color:#fff}
+.lic-actions #lic-download,.lic-actions #lic-licence{grid-column:1/-1}
+.lic-actions .btn-ghost,.lic-tilt{background:transparent;color:#f4f4f6;border-color:#3a3e4b}
+.lic-actions button:disabled{opacity:.45;cursor:not-allowed}
+.lic-video-hint{margin-top:10px}
+
+.lic-stage{margin:0;display:flex;flex-direction:column;align-items:center;gap:12px}
+.lic-3d{position:relative;width:100%;aspect-ratio:1/1;max-height:80vh;touch-action:none;cursor:grab;border-radius:18px}
+.lic-3d:active{cursor:grabbing}
+.lic-3d canvas{display:block;width:100%!important;height:100%!important}
+.lic-3d.flat{display:grid;place-items:center;perspective:1200px}
+.lic-3d.flat canvas{width:auto!important;height:94%!important;border-radius:5%/3.5%;box-shadow:0 30px 70px #000b;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .12s ease-out}
+.lic-stage figcaption{font-size:13.5px;color:#7d808a;text-align:center}
+.lic-footer{max-width:1180px;margin:auto;padding:0 24px 32px;font-size:13px;color:#6d707a}
+@media(max-width:860px){
+  .lic-layout{grid-template-columns:1fr;gap:20px}
+  .lic-stage{order:-1}
+  .lic-3d{aspect-ratio:4/5;max-height:72vh}
+  .lic-top,.lic-main,.lic-footer{padding-left:16px;padding-right:16px}
+  .lic-tag{display:none}
+}

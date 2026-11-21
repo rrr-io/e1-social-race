@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0c0f">
+<meta name="description" content="Get your ENHYPEN MAMA Grand Prix 2026 certificate of participation with your crew licence, as a 3D pass to download.">
+<title>EMGP26 Certificates</title>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/license.css">
+<script defer src="/common.js"></script>
+<script type="module" src="/license.js"></script>
+</head>
+<body>
+<header class="lic-top">
+  <span class="lic-brand"><i aria-hidden="true"></i>ENHYPEN MAMA GRAND PRIX</span>
+  <span class="lic-tag">Certificates · Season 2026</span>
+</header>
+
+<main class="lic-main">
+  <section class="lic-intro">
+    <h1>Your certificate</h1>
+    <p>Enter your username, team and crew licence to get your certificate of participation. Turn it around, then download it, your crew licence or a short video for your stories.</p>
+  </section>
+
+  <div class="lic-layout">
+    <form id="lic-form" class="lic-form" novalidate>
+      <label>Username
+        <input name="username" required maxlength="24" autocomplete="nickname" autocapitalize="none" spellcheck="false" placeholder="e.g. awannv">
+      </label>
+      <label>Team
+        <select name="team" required>
+          <option value="">Choose your team</option>
+          <option value="jaybull">Jaybull Racing · Team Jay</option>
+          <option value="mcjakey">McJakey · Team Jake</option>
+          <option value="hoonrari">Hoonrari · Team Sunghoon</option>
+          <option value="alpinoo">Alpinoo · Team Sunoo</option>
+          <option value="meowcedes">Meowcedes · Team Jungwon</option>
+          <option value="rikston">Rikston Drift · Team Ni-ki</option>
+        </select>
+      </label>
+      <label>Crew licence
+        <select name="level" required id="lic-level"><option value="">Choose your level</option></select>
+        <small class="field-hint">The level you reached, as shown on e1.ensite.org.</small>
+      </label>
+      <p id="lic-message" class="form-message" role="status" aria-live="polite"></p>
+      <div class="lic-actions">
+        <button type="button" id="lic-download">Download certificate</button>
+        <button type="button" id="lic-licence" class="btn-ghost">Download crew licence</button>
+        <button type="button" id="lic-video" class="btn-ghost">Download video</button>
+        <button type="button" id="lic-flip" class="btn-ghost">Flip</button>
+      </div>
+      <small class="field-hint lic-video-hint" id="lic-video-hint">The video is a 4-second spin of your certificate, 1080 × 1350.</small>
+    </form>
+
+    <figure class="lic-stage">
+      <div id="lic-3d" class="lic-3d" aria-label="Your certificate in 3D. Drag to turn it."></div>
+      <figcaption id="lic-hint">Drag to turn the pass · tap “Flip” to see the back.</figcaption>
+      <button type="button" id="lic-tilt" class="btn-ghost lic-tilt" hidden>Enable motion</button>
+    </figure>
+  </div>
+</main>
+<footer class="lic-footer"><p>Fan-made for the ENHYPEN MAMA Grand Prix initiative · Six teams. One ENHYPEN.</p></footer>
+</body>
+</html>

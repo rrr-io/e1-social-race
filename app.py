@@ -77,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        redirects = {'/race': '/', '/race/': '/', '/race-admin': '/admin#race', '/race-admin/': '/admin#race', '/admin/': '/admin', '/collab-verify/': '/collab-verify'}
+        redirects = {'/crew-license/': '/crew-license', '/race': '/', '/race/': '/', '/race-admin': '/admin#race', '/race-admin/': '/admin#race', '/admin/': '/admin', '/collab-verify/': '/collab-verify'}
         if path in redirects:
             return self.reply(302, '', extra={'Location': redirects[path]})
         if path == '/api/race':
@@ -88,7 +88,12 @@ class Handler(BaseHTTPRequestHandler):
                   '/style.css': ('style.css', 'text/css'), '/collab.css': ('collab.css', 'text/css'), '/common.css': ('common.css', 'text/css'),
                   '/e1-logo.png': ('e1-logo.png', 'image/png'), '/favicon.ico': ('favicon.ico', 'image/x-icon'),
                   '/favicon-32.png': ('favicon-32.png', 'image/png'), '/apple-touch-icon.png': ('apple-touch-icon.png', 'image/png'),
-                  '/icon-512.png': ('icon-512.png', 'image/png'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json')}
+                  '/icon-512.png': ('icon-512.png', 'image/png'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json'),
+                  # Crew licence maker: static page, the card is drawn in the browser (see LICENSE_CARD.md).
+                  '/crew-license': ('license.html', 'text/html'), '/license.js': ('license.js', 'application/javascript'),
+                  '/license.css': ('license.css', 'text/css'), '/vendor/three.module.min.js': ('vendor/three.module.min.js', 'application/javascript'),
+                  **{f'/fonts/titillium-web-latin-{w}-normal.woff2': (f'fonts/titillium-web-latin-{w}-normal.woff2', 'font/woff2') for w in (400, 600, 700, 900)},
+                  **{f'/licences/{n:02d}.png': (f'licences/{n:02d}.png', 'image/png') for n in range(1, 19)}}
         if re.fullmatch(r'/report/[\w-]{20,64}', path):  # the link itself is the credential; keep it out of search engines and referrers
             return self.reply(200, (STATIC / 'report.html').read_bytes(), 'text/html; charset=utf-8',
                               {'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer'})
@@ -110,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(status, body, mime, {'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer', **(headers[0] if headers else {})})
         if path in public:
             filename, mime = public[path]
-            return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
+            return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith(('image/', 'font/')) else mime + '; charset=utf-8')
         if not self.authenticated():
             return
         if path == '/api/race/admin':
@@ -120,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
                        '/collab-verify': ('collab.html', 'text/html'), '/collab.js': ('collab.js', 'application/javascript')}
         if path in admin_files:
             filename, mime = admin_files[path]
-            return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith('image/') else mime + '; charset=utf-8')
+            return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith(('image/', 'font/')) else mime + '; charset=utf-8')
         if path.startswith('/api/collab/'):
             try:
                 result = collab.get(path, parse_qs(urlsplit(self.path).query))

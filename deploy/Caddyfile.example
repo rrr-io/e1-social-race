@@ -5,3 +5,12 @@ social-pulse.rrriooo.com {
     encode zstd gzip
     reverse_proxy e1-social-pulse:8000
 }
+
+# EMGP26 certificates on their own subdomain (same container, no extra deploy).
+# Point the subdomain's DNS (A/AAAA) to the server, change the hostname, reload Caddy.
+emgp26-certificates.enhypenvoting.com {
+    encode zstd gzip
+    @root path /
+    rewrite @root /crew-license
+    reverse_proxy e1-social-pulse:8000
+}
