@@ -150,11 +150,14 @@ const AWARDS = [   // 2026 MAMA Awards, Kyocera Dome Osaka
   ["Fans' Choice of the Year", 'GRAND PRIZE · DAESANG · WITH VISA', 'grand'],
 ];
 // Finishes the user can choose: the moving foil in 3D and a still version for the PNG.
-const FINISHES = {
-  holo: {mode: 0, strength: .5, pngAlpha: .3, png: [[.18, 'rgba(0,0,0,0)'], [.3, '#ff4fd855'], [.38, '#ffd76a55'], [.46, '#5dffc255'], [.54, '#55c8ff55'], [.62, '#b07cff55'], [.74, 'rgba(0,0,0,0)']]},
-  prism: {mode: 1, strength: .6, pngAlpha: .35, png: [[.1, 'rgba(0,0,0,0)'], [.25, '#7cf7ff44'], [.4, '#ff7cf544'], [.55, '#fff37c44'], [.7, '#7cff9a44'], [.85, 'rgba(0,0,0,0)']]},
-  gold: {mode: 2, strength: .55, pngAlpha: .35, png: [[.2, 'rgba(0,0,0,0)'], [.38, '#ffd98066'], [.48, '#fff4c866'], [.58, '#e3b44a66'], [.76, 'rgba(0,0,0,0)']]},
-  matte: {mode: 3, strength: .25, pngAlpha: 0, png: []},
+const FINISHES = {   // 3D only: the downloaded PNG stays clean
+  none: {mode: 3, strength: .25},
+  holo: {mode: 0, strength: .5},
+  galaxy: {mode: 4, strength: 1.0},
+  stardust: {mode: 5, strength: 1.6},
+  aurora: {mode: 6, strength: .55},
+  prism: {mode: 1, strength: .6},
+  gold: {mode: 2, strength: .55},
 };
 const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 function passBase(ctx, c) {
@@ -202,6 +205,14 @@ function guillocheBand(ctx, x, y, w, h, color, waves, phase) {
   }
 }
 function certificateTexture(ctx, c) {
+  // A faint starry sky, the theme of the 2026 MAMA Awards.
+  let seed = 2026;
+  const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < 260; i++) {
+    const x = rnd() * PW, y = rnd() * PH, r = rnd() < .92 ? .5 + rnd() * .8 : 1.3 + rnd() * 1.1, a = .12 + rnd() * .4;
+    ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    if (r > 1.8) { ctx.strokeStyle = `rgba(255,255,255,${a * .5})`; ctx.lineWidth = .6; ctx.beginPath(); ctx.moveTo(x - r * 3, y); ctx.lineTo(x + r * 3, y); ctx.moveTo(x, y - r * 3); ctx.lineTo(x, y + r * 3); ctx.stroke(); }
+  }
   // Paper grain.
   ctx.save(); ctx.globalAlpha = .05; ctx.globalCompositeOperation = 'overlay';
   ctx.fillStyle = grainPattern(ctx); ctx.scale(.5, .5); ctx.fillRect(0, 0, PW * 2, PH * 2); ctx.restore();
@@ -221,15 +232,6 @@ function seal(ctx, x, y, r, c) {
   ctx.font = font(r * .36, 900); ctx.fillText('E1', 0, -r * .05);
   ctx.font = font(r * .13, 700); ctx.fillText('2026', 0, r * .27);
   ctx.restore();
-}
-function passFoil(ctx) {
-  // A still holographic band for the downloaded image (the 3D view has a moving one).
-  const finish = FINISHES[form.elements.finish?.value] || FINISHES.holo;
-  if (!finish.png.length) return;
-  ctx.save(); ctx.globalCompositeOperation = 'color-dodge'; ctx.globalAlpha = finish.pngAlpha;
-  const g = ctx.createLinearGradient(0, PH * .15, PW, PH * .6);
-  finish.png.forEach(([o, col]) => g.addColorStop(o, col));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, PW, PH); ctx.restore();
 }
 function passEdge(ctx, c) {
   roundRect(ctx, 1.5, 1.5, PW - 3, PH - 3, PRADIUS); ctx.strokeStyle = hexA(c, .55); ctx.lineWidth = 3; ctx.stroke();
@@ -296,7 +298,7 @@ function drawPassFront(ctx, v, withLicence = true) {
   let bx = PW - 356, seed = [...no].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0;
   ctx.fillStyle = '#e8e8ee';
   while (bx < PW - 60) { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; const w = 2 + (seed % 3) * 2; ctx.fillRect(bx, PH - 124, w, 72); bx += w + 3 + ((seed >>> 8) % 3) * 2; }
-  passFoil(ctx); ctx.restore(); passEdge(ctx, c);
+  ctx.restore(); passEdge(ctx, c);
 }
 function trophy(ctx, x, y, s, color) {
   ctx.save(); ctx.translate(x - s / 2, y - s / 2); ctx.scale(s / 48, s / 48); ctx.fillStyle = color;
@@ -336,7 +338,7 @@ function drawPassBack(ctx, v) {
   ctx.fillStyle = '#d4d5db'; ctx.font = font(32, 400); ctx.fillText('We crossed the line together.', PW / 2, 1080);
   ctx.fillStyle = '#fff'; ctx.font = font(32, 700); ctx.fillText('Six teams. One ENHYPEN.', PW / 2, 1124);
   ctx.textAlign = 'left';
-  passFoil(ctx); ctx.restore(); passEdge(ctx, c);
+  ctx.restore(); passEdge(ctx, c);
 }
 const issued = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: '2-digit', month: 'short', year: 'numeric'}).format(new Date()).toUpperCase();
 function licenceNumber(v) {
@@ -365,7 +367,17 @@ function heightFrom(src, dst) {
     d[i] = d[i + 1] = d[i + 2] = h; d[i + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  ctx.filter = 'blur(1px)'; ctx.drawImage(dst, 0, 0); ctx.filter = 'none';
+  ctx.filter = 'blur(1.2px)'; ctx.drawImage(dst, 0, 0); ctx.filter = 'none';
+  // Height -> normal map (Sobel).
+  const h = ctx.getImageData(0, 0, dst.width, dst.height).data, w = dst.width, hh = dst.height;
+  const out = ctx.createImageData(w, hh), o = out.data, k = 3.2;
+  const at = (x, y) => h[((Math.min(hh - 1, Math.max(0, y)) * w) + Math.min(w - 1, Math.max(0, x))) * 4] / 255;
+  for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+    const dx = (at(x + 1, y) - at(x - 1, y)) * k, dy = (at(x, y + 1) - at(x, y - 1)) * k;
+    const len = Math.hypot(dx, dy, 1), i = (y * w + x) * 4;
+    o[i] = (-dx / len * .5 + .5) * 255; o[i + 1] = (dy / len * .5 + .5) * 255; o[i + 2] = (1 / len * .5 + .5) * 255; o[i + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
 }
 let paintId = 0;
 async function paint() {
@@ -438,12 +450,12 @@ function createView() {
   const frontBump = new THREE.CanvasTexture(frontHeight), backBump = new THREE.CanvasTexture(backHeight);
   const face = faceGeometry(shape, W, H);
   // Printed faces under a glossy clear coat (reflects the studio when the card turns).
-  const faceMat = (map, bumpMap) => new THREE.MeshPhysicalMaterial({map, bumpMap, bumpScale: 2.2, roughness: .5, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .55});
+  const faceMat = (map, normalMap) => new THREE.MeshPhysicalMaterial({map, normalMap, normalScale: new THREE.Vector2(2.4, 2.4), clearcoatNormalMap: normalMap, clearcoatNormalScale: new THREE.Vector2(1.2, 1.2), roughness: .45, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .7});
   const faceZ = D / 2 + B + .0006;
   const frontMesh = new THREE.Mesh(face, faceMat(frontTex, frontBump)); frontMesh.position.z = faceZ; card.add(frontMesh);
   const backMesh = new THREE.Mesh(face, faceMat(backTex, backBump)); backMesh.rotation.y = Math.PI; backMesh.position.z = -faceZ; card.add(backMesh);
   // The crew licence: its own raised, glossy plate inside the sleeve.
-  const lw = SLOT.w / PW * W, lh = SLOT.h / PH * H, lr = 22 / PW * W, ld = .012, lb = .005;
+  const lw = SLOT.w / PW * W, lh = SLOT.h / PH * H, lr = 22 / PW * W, ld = .0025, lb = .0018;
   const licShape = roundedShape(lw, lh, lr);
   const plate = new THREE.Group();
   plate.position.set((SLOT.x + SLOT.w / 2) / PW * W - W / 2, H / 2 - (SLOT.y + SLOT.h / 2) / PH * H, faceZ + lb);
@@ -469,6 +481,11 @@ function createView() {
     fragmentShader: `uniform float uStrength; uniform float uTime; uniform int uMode; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
       vec3 rainbow(float t){ return .5 + .5 * cos(6.28318 * (t + vec3(0.0, .33, .67))); }
       float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
+      float fbm(vec2 p){ float v = 0.0, a = .5; for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= .5; } return v; }
+      float stars(vec2 p, float th){ vec2 c = floor(p), f = fract(p) - .5; float h = hash(c);
+        if (h < th) return 0.0; vec2 o = vec2(hash(c + 1.7), hash(c + 3.1)) - .5; return smoothstep(.12, .0, length(f - o * .6)) * (h - th) / (1.0 - th) * 2.0; }
       void main(){
         float f = dot(vN, vV);
         vec2 tilt = vec2(vV.x - vN.x, vV.y - vN.y);
@@ -487,7 +504,27 @@ function createView() {
         } else if (uMode == 2) {   // gold foil: a warm specular sweep
           float s = exp(-pow((vUv.x * .7 + vUv.y * .5 - .6 - tilt.x * 1.6 + tilt.y * 1.2) * 4.0, 2.0));
           col = mix(vec3(.89, .70, .29), vec3(1.0, .95, .78), s); a = uStrength * (.12 + .88 * s);
-        } else {                   // matte: only a soft sheen
+        } else if (uMode == 4) {   // galaxy: a nebula that drifts with the angle, with stars
+          vec2 q = vUv * vec2(1.0, 1.46) * 2.4 + tilt * 1.4;
+          float n = fbm(q + fbm(q * 1.7 + uTime * .03));
+          vec3 neb = mix(vec3(.20, .10, .55), vec3(.95, .30, .75), smoothstep(.35, .75, n));
+          neb = mix(neb, vec3(.25, .75, 1.0), smoothstep(.62, .9, fbm(q * 2.3 - 4.0)));
+          float st = stars(vUv * vec2(120.0, 175.0) + tilt * 8.0, .975);
+          col = neb + st; a = uStrength * (.3 + .7 * smoothstep(.25, .75, n)) + st;
+        } else if (uMode == 5) {   // stardust: three layers of stars at different depths (parallax)
+          float st = 0.0;
+          for (int l = 0; l < 3; l++) {
+            float d = float(l + 1);
+            st += stars(vUv * vec2(55.0, 80.0) * d + tilt * 14.0 / d + d * 7.0, .975 - .006 * d) * (1.2 / d)
+                  * (.6 + .4 * sin(uTime * (1.5 + d) + d * 3.0 + vUv.x * 40.0));
+          }
+          col = vec3(.85, .9, 1.0); a = uStrength * st + .05 * rim;
+        } else if (uMode == 6) {   // aurora: soft flowing curtains of green and violet
+          float y = vUv.y + .08 * sin(vUv.x * 6.0 + uTime * .4 + tilt.x * 4.0) + tilt.y * .6;
+          float c1 = exp(-pow((y - .72) * 7.0, 2.0)), c2 = exp(-pow((y - .48 + .05 * sin(vUv.x * 9.0 - uTime * .3)) * 9.0, 2.0));
+          float rays = .6 + .4 * fbm(vec2(vUv.x * 18.0 + tilt.x * 6.0, uTime * .1));
+          col = vec3(.2, 1.0, .65) * c1 + vec3(.65, .35, 1.0) * c2; a = uStrength * (c1 + c2) * rays;
+        } else {                   // none: only a soft sheen
           float s = exp(-pow((vUv.x - .5 - tilt.x * 1.5) * 3.0, 2.0)); col = vec3(1.0); a = uStrength * .35 * s;
         }
         gl_FragColor = vec4(col * a, a);
@@ -557,7 +594,7 @@ function createView() {
     update(v) {
       frontTex.needsUpdate = true; backTex.needsUpdate = true; licTex.needsUpdate = true; frontBump.needsUpdate = true; backBump.needsUpdate = true;
       // Foil: subtle on the ladder, stronger on prestige levels; light designs need less to stay readable.
-      const finish = FINISHES[form.elements.finish?.value] || FINISHES.holo;
+      const finish = FINISHES[form.elements.finish?.value] || FINISHES.none;
       holo.uniforms.uMode.value = finish.mode;
       holo.uniforms.uStrength.value = finish.strength * (v.level?.tier === 'star' ? 1.15 : 1);
     },
