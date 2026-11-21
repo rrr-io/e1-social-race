@@ -93,6 +93,7 @@ class Handler(BaseHTTPRequestHandler):
                   '/crew-license': ('license.html', 'text/html'), '/license.js': ('license.js', 'application/javascript'),
                   '/license.css': ('license.css', 'text/css'), '/vendor/three.module.min.js': ('vendor/three.module.min.js', 'application/javascript'),
                   **{f'/fonts/titillium-web-latin-{w}-normal.woff2': (f'fonts/titillium-web-latin-{w}-normal.woff2', 'font/woff2') for w in (400, 600, 700, 900)},
+                  '/e1-qr.png': ('e1-qr.png', 'image/png'),
                   **{f'/licences/{n:02d}.png': (f'licences/{n:02d}.png', 'image/png') for n in range(1, 19)}}
         if re.fullmatch(r'/report/[\w-]{20,64}', path):  # the link itself is the credential; keep it out of search engines and referrers
             return self.reply(200, (STATIC / 'report.html').read_bytes(), 'text/html; charset=utf-8',

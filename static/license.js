@@ -52,6 +52,8 @@ const RED = '#e10600';
 const font = (size, weight) => `${weight} ${size}px ${FONT}`;
 const logo = new Image();
 logo.src = '/e1-logo.png';
+const qr = new Image();
+qr.src = '/e1-qr.png';
 
 function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 function fit(ctx, text, maxWidth, size, weight, min = 0.55) {
@@ -295,9 +297,15 @@ function drawPassFront(ctx, v, withLicence = true) {
   spaced(ctx, 'CERTIFICATE NO.', 56, PH - 120, 3);
   ctx.fillStyle = '#fff'; spaced(ctx, no, 56, PH - 86, 4);
   ctx.fillStyle = '#8d8f99'; spaced(ctx, `ISSUED ${issued} · KST`, 56, PH - 52, 3);
-  let bx = PW - 356, seed = [...no].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0;
-  ctx.fillStyle = '#e8e8ee';
-  while (bx < PW - 60) { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; const w = 2 + (seed % 3) * 2; ctx.fillRect(bx, PH - 124, w, 72); bx += w + 3 + ((seed >>> 8) % 3) * 2; }
+  // QR code to e1.ensite.org, where the crew uploaded their votes and earned their licences.
+  if (qr.complete && qr.naturalWidth) {
+    const q = 104, qx = PW - 56 - q, qy = PH - 52 - q;
+    ctx.drawImage(qr, qx, qy, q, q);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#8d8f99'; ctx.font = font(18, 700);
+    ctx.fillText('SCAN TO REVISIT THE RACE', qx - 18, PH - 54);
+    ctx.fillStyle = '#d4d5db'; ctx.font = font(20, 600); ctx.fillText('Every vote counted.', qx - 18, PH - 112); ctx.fillText('Every licence earned.', qx - 18, PH - 86);
+    ctx.textAlign = 'left';
+  }
   ctx.restore(); passEdge(ctx, c);
 }
 function trophy(ctx, x, y, s, color) {
@@ -722,6 +730,6 @@ if (!reduced && matchMedia('(pointer: coarse)').matches && 'DeviceOrientationEve
 form.addEventListener('input', paint);
 form.addEventListener('submit', e => e.preventDefault());
 await Promise.all(['400', '600', '700'].map(w => document.fonts.load(`${w} 40px "Titillium Web"`))).catch(() => {});
-if (!logo.complete) await new Promise(r => { logo.onload = logo.onerror = r; });
+await Promise.all([logo, qr].map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r; })));
 try { view = createView(); } catch { view = createFlatView(); }
 paint();
