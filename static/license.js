@@ -248,7 +248,7 @@ function wrapText(ctx, parts, x, y, maxWidth, lineHeight) {
   }
   return y;
 }
-function drawPassFront(ctx, v) {
+function drawPassFront(ctx, v, withLicence = true) {
   const c = v.team?.color || '#9a9ca6';
   ctx.save(); passBase(ctx, c);
   ctx.textBaseline = 'alphabetic';
@@ -262,11 +262,16 @@ function drawPassFront(ctx, v) {
   roundRect(ctx, sx, sy, sw, sh, 30);
   const sg = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh); sg.addColorStop(0, 'rgba(255,255,255,.12)'); sg.addColorStop(.4, 'rgba(255,255,255,.03)'); sg.addColorStop(1, 'rgba(255,255,255,.08)');
   ctx.fillStyle = sg; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 2; ctx.stroke();
+  if (!withLicence) {
+    // 3D view: the licence is a separate raised plate; leave a recess for it.
+    roundRect(ctx, sx + 18, sy + 18, inner, ih, 22); ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fill();
+  } else {
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 36; ctx.shadowOffsetY = 16;
   ctx.drawImage(licence, sx + 18, sy + 18, inner, ih); ctx.restore();
   ctx.save(); roundRect(ctx, sx + 18, sy + 18, inner, ih, 22); ctx.clip();
   const gl = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh); gl.addColorStop(.3, 'rgba(255,255,255,0)'); gl.addColorStop(.42, 'rgba(255,255,255,.16)'); gl.addColorStop(.52, 'rgba(255,255,255,0)');
   ctx.fillStyle = gl; ctx.fillRect(sx, sy, sw, sh); ctx.restore();
+  }
   // Statement.
   const name = v.username || 'your username';
   let y = wrapText(ctx, [
@@ -343,6 +348,25 @@ function licenceNumber(v) {
 const licence = document.createElement('canvas'); licence.width = CW * SCALE; licence.height = CH * SCALE;
 const front = document.createElement('canvas'); front.width = PW * PSCALE; front.height = PH * PSCALE;
 const back = document.createElement('canvas'); back.width = PW * PSCALE; back.height = PH * PSCALE;
+const frontBase = document.createElement('canvas'); frontBase.width = front.width; frontBase.height = front.height;
+// Where the licence sits on the pass (logical pass pixels), shared by the 2D drawing and the 3D plate.
+const SLOT = (() => { const sx = 48, sy = 278, inner = PW - 96 - 36; return {x: sx + 18, y: sy + 18, w: inner, h: inner * CH / CW}; })();
+// Emboss: bright print (text, logo, zones, barcode) becomes a bump map, so it stands out in 3D.
+const HS = .5;
+const frontHeight = document.createElement('canvas'); frontHeight.width = PW * PSCALE * HS; frontHeight.height = PH * PSCALE * HS;
+const backHeight = document.createElement('canvas'); backHeight.width = frontHeight.width; backHeight.height = frontHeight.height;
+function heightFrom(src, dst) {
+  const ctx = dst.getContext('2d', {willReadFrequently: true});
+  ctx.clearRect(0, 0, dst.width, dst.height); ctx.drawImage(src, 0, 0, dst.width, dst.height);
+  const img = ctx.getImageData(0, 0, dst.width, dst.height), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = (.2126 * d[i] + .7152 * d[i + 1] + .0722 * d[i + 2]) / 255;
+    const h = Math.max(0, Math.min(1, (l - .5) / .3)) * 255;
+    d[i] = d[i + 1] = d[i + 2] = h; d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.filter = 'blur(1px)'; ctx.drawImage(dst, 0, 0); ctx.filter = 'none';
+}
 let paintId = 0;
 async function paint() {
   const v = values(), id = ++paintId;
@@ -350,11 +374,12 @@ async function paint() {
   if (id !== paintId) return;   // a newer change is already being drawn
   const lctx = licence.getContext('2d');
   lctx.setTransform(SCALE, 0, 0, SCALE, 0, 0); lctx.clearRect(0, 0, CW, CH); drawLicence(lctx, v, art);
-  for (const [canvas, draw] of [[front, drawPassFront], [back, drawPassBack]]) {
+  for (const [canvas, draw, arg] of [[front, drawPassFront, true], [frontBase, drawPassFront, false], [back, drawPassBack]]) {
     const ctx = canvas.getContext('2d');
     ctx.setTransform(PSCALE, 0, 0, PSCALE, 0, 0); ctx.clearRect(0, 0, PW, PH);
-    draw(ctx, v);
+    draw(ctx, v, arg);
   }
+  if (view?.renderer) { heightFrom(frontBase, frontHeight); heightFrom(back, backHeight); }
   view?.update(v);
 }
 
@@ -409,13 +434,24 @@ function createView() {
   card.add(new THREE.Mesh(sideGeo, [new THREE.MeshBasicMaterial({visible: false}), edge]));
 
   const tex = canvas => { const t = new THREE.CanvasTexture(canvas); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t; };
-  const frontTex = tex(front), backTex = tex(back);
+  const frontTex = tex(frontBase), backTex = tex(back), licTex = tex(licence);
+  const frontBump = new THREE.CanvasTexture(frontHeight), backBump = new THREE.CanvasTexture(backHeight);
   const face = faceGeometry(shape, W, H);
   // Printed faces under a glossy clear coat (reflects the studio when the card turns).
-  const faceMat = map => new THREE.MeshPhysicalMaterial({map, roughness: .5, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .55});
+  const faceMat = (map, bumpMap) => new THREE.MeshPhysicalMaterial({map, bumpMap, bumpScale: 2.2, roughness: .5, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .55});
   const faceZ = D / 2 + B + .0006;
-  const frontMesh = new THREE.Mesh(face, faceMat(frontTex)); frontMesh.position.z = faceZ; card.add(frontMesh);
-  const backMesh = new THREE.Mesh(face, faceMat(backTex)); backMesh.rotation.y = Math.PI; backMesh.position.z = -faceZ; card.add(backMesh);
+  const frontMesh = new THREE.Mesh(face, faceMat(frontTex, frontBump)); frontMesh.position.z = faceZ; card.add(frontMesh);
+  const backMesh = new THREE.Mesh(face, faceMat(backTex, backBump)); backMesh.rotation.y = Math.PI; backMesh.position.z = -faceZ; card.add(backMesh);
+  // The crew licence: its own raised, glossy plate inside the sleeve.
+  const lw = SLOT.w / PW * W, lh = SLOT.h / PH * H, lr = 22 / PW * W, ld = .012, lb = .005;
+  const licShape = roundedShape(lw, lh, lr);
+  const plate = new THREE.Group();
+  plate.position.set((SLOT.x + SLOT.w / 2) / PW * W - W / 2, H / 2 - (SLOT.y + SLOT.h / 2) / PH * H, faceZ + lb);
+  const plateSide = new THREE.ExtrudeGeometry(roundedShape(lw - 2 * lb, lh - 2 * lb, lr - lb), {depth: ld, bevelEnabled: true, bevelThickness: lb, bevelSize: lb, bevelSegments: 3, curveSegments: 12});
+  plate.add(new THREE.Mesh(plateSide, new THREE.MeshPhysicalMaterial({color: 0x1a1b20, roughness: .3, clearcoat: 1, clearcoatRoughness: .08})));
+  const licMesh = new THREE.Mesh(faceGeometry(licShape, lw, lh), new THREE.MeshPhysicalMaterial({map: licTex, roughness: .55, clearcoat: .7, clearcoatRoughness: .05, envMapIntensity: .25, toneMapped: false}));
+  licMesh.position.z = ld + lb + .0004; plate.add(licMesh);
+  card.add(plate);
   // Soft shadow on an invisible floor behind the card: it shifts and blurs as the card turns.
   const sh = document.createElement('canvas'); sh.width = sh.height = 256;
   const shx = sh.getContext('2d'), sg = shx.createRadialGradient(128, 128, 0, 128, 128, 128);
@@ -519,7 +555,7 @@ function createView() {
   return {
     renderer, scene, camera, card, state,
     update(v) {
-      frontTex.needsUpdate = true; backTex.needsUpdate = true;
+      frontTex.needsUpdate = true; backTex.needsUpdate = true; licTex.needsUpdate = true; frontBump.needsUpdate = true; backBump.needsUpdate = true;
       // Foil: subtle on the ladder, stronger on prestige levels; light designs need less to stay readable.
       const finish = FINISHES[form.elements.finish?.value] || FINISHES.holo;
       holo.uniforms.uMode.value = finish.mode;
