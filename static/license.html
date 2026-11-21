@@ -41,6 +41,7 @@
           <option value="alpinoo">Alpinoo · Team Sunoo</option>
           <option value="meowcedes">Meowcedes · Team Jungwon</option>
           <option value="rikston">Rikston Drift · Team Ni-ki</option>
+          <option value="independent">Independent Crew</option>
         </select>
       </label>
       <label>Crew licence
@@ -66,11 +67,24 @@
         <button type="button" id="lic-video" class="btn-ghost">Download video</button>
         <button type="button" id="lic-flip" class="btn-ghost">Flip</button>
       </div>
+      <fieldset class="lic-share" id="lic-share">
+        <legend>Share the video</legend>
+        <button type="button" data-format="story" class="btn-ghost"><span>Story · Reel · TikTok</span><small>9:16</small></button>
+        <button type="button" data-format="post" class="btn-ghost"><span>Instagram post</span><small>4:5</small></button>
+        <button type="button" data-format="square" class="btn-ghost"><span>X post</span><small>1:1</small></button>
+      </fieldset>
+      <button type="button" id="lic-embed" class="btn-ghost lic-embed-btn">Embed on your site</button>
+      <div class="lic-embed-box" id="lic-embed-box" hidden>
+        <textarea id="lic-embed-code" rows="4" readonly aria-label="Embed code"></textarea>
+        <button type="button" id="lic-embed-copy">Copy code</button>
+        <small class="field-hint">Paste it into your site, Carrd or Notion (embed block). The card turns and reacts to the mouse and phone motion.</small>
+      </div>
       <small class="field-hint lic-video-hint" id="lic-video-hint">The video is a 4-second spin of your certificate, 1080 × 1350.</small>
     </form>
 
     <figure class="lic-stage">
       <div id="lic-3d" class="lic-3d" aria-label="Your certificate in 3D. Drag to turn it."></div>
+      <a class="lic-get" href="/crew-license" target="_blank" rel="noopener">Get your certificate ↗</a>
       <figcaption id="lic-hint">Drag to turn the pass · tap “Flip” to see the back.</figcaption>
       <button type="button" id="lic-tilt" class="btn-ghost lic-tilt" hidden>Enable motion</button>
     </figure>
@@ -78,7 +92,7 @@
 </main>
 <footer class="lic-footer">
   <a class="lic-link" href="https://e1.ensite.org" target="_blank" rel="noopener"><img src="/e1-logo.png" alt="" height="22"><span><strong>e1.ensite.org</strong><small>Your daily vote proofs, your season points, your crew licence.</small></span><b aria-hidden="true">↗</b></a>
-  <p>Fan-made for the ENHYPEN MAMA Grand Prix initiative · Six teams. One ENHYPEN.</p>
+  <p>Fan-made for the ENHYPEN MAMA Grand Prix initiative · Different Colors. Same finish line.</p>
 </footer>
 </body>
 </html>

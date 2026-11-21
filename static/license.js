@@ -17,7 +17,9 @@ const TEAMS = {
   alpinoo: {name: 'Alpinoo', member: 'Team Sunoo', color: '#ff7eb6'},
   meowcedes: {name: 'Meowcedes', member: 'Team Jungwon', color: '#2ee6c5'},
   rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#4cd964'},
+  independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
 };
+const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
 // The progression ladder and the prestige distinctions of e1.ensite.org.
 const LEVELS = [
   ['Paddock Rookie', 0], ['Race Ready', 5], ['Fast Lane', 10], ['Pit Lane Pro', 20], ['Redline Ace', 25],
@@ -136,7 +138,7 @@ function drawLicence(ctx, v, art) {
   const name = v.username || 'Your Name';
   ctx.fillStyle = ink; ctx.globalAlpha = v.username ? 1 : .35;
   fit(ctx, name, 900, 81, 700); ctx.fillText(name, 88, 386);
-  const team = v.team ? `${v.team.name} - ${v.team.member}` : 'Your Team';
+  const team = v.team ? teamLabel(v.team, ' - ') : 'Your Team';
   ctx.fillStyle = sub; ctx.globalAlpha = v.team ? 1 : .5;
   fit(ctx, team, 900, 46, 600); ctx.fillText(team, 89, 463);
   ctx.globalAlpha = 1;
@@ -280,7 +282,7 @@ function drawPassFront(ctx, v, withLicence = true) {
   const name = v.username || 'your username';
   let y = wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
-    {text: ' raced with ', color: '#c9cad0', weight: 400}, {text: v.team ? `${v.team.name} · ${v.team.member}` : 'your team', color: c, weight: 700},
+    {text: ' raced with ', color: '#c9cad0', weight: 400}, {text: v.team ? teamLabel(v.team, ' · ') : 'your team', color: c, weight: 700},
     {text: ' in the ENHYPEN MAMA Grand Prix 2026, reaching the ', color: '#c9cad0', weight: 400},
     {text: v.level ? v.level.name : 'your', color: '#fff', weight: 700}, {text: ' crew licence.', color: '#c9cad0', weight: 400},
   ], 56, sy + sh + 66, PW - 112, 44);
@@ -343,8 +345,8 @@ function drawPassBack(ctx, v) {
     ctx.fillText(grand ? title.toUpperCase() : title, PW / 2, y + (grand ? 58 : 46));
   });
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#d4d5db'; ctx.font = font(32, 400); ctx.fillText('We crossed the line together.', PW / 2, 1080);
-  ctx.fillStyle = '#fff'; ctx.font = font(32, 700); ctx.fillText('Six teams. One ENHYPEN.', PW / 2, 1124);
+  ctx.fillStyle = '#d4d5db'; ctx.font = font(34, 400); ctx.fillText('Different Colors.', PW / 2, 1080);
+  ctx.fillStyle = '#fff'; ctx.font = font(34, 700); ctx.fillText('Same finish line.', PW / 2, 1126);
   ctx.textAlign = 'left';
   ctx.restore(); passEdge(ctx, c);
 }
@@ -423,7 +425,7 @@ function faceGeometry(shape, w, h) {
 }
 
 function createView() {
-  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: false});
+  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true});
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   stage.append(renderer.domElement);
@@ -591,14 +593,15 @@ function createView() {
     shadow.position.y = -.14 - card.position.y * 1.5 + card.rotation.x * .2;
     shadow.scale.set(.35 + .65 * turn, 1, 1);
     shadow.material.opacity = .55 + .45 * turn;
-    renderer.render(scene, camera);
-    if (state.spin?.onFrame) state.spin.onFrame();
+    scene.background = state.rec?.background || null;
+    renderer.render(scene, state.rec?.camera || camera);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
   return {
     renderer, scene, camera, card, state,
+    resize,
     update(v) {
       frontTex.needsUpdate = true; backTex.needsUpdate = true; licTex.needsUpdate = true; frontBump.needsUpdate = true; backBump.needsUpdate = true;
       // Foil: subtle on the ladder, stronger on prestige levels; light designs need less to stay readable.
@@ -666,49 +669,154 @@ function videoType() {
   }
   return null;
 }
-function videoBackground(v) {
-  const c = document.createElement('canvas'); c.width = 1080; c.height = 1350;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#0b0c0f'; ctx.fillRect(0, 0, 1080, 1350);
-  const g = ctx.createRadialGradient(540, 620, 0, 540, 620, 820);
-  g.addColorStop(0, hexA(v.team.color, .32)); g.addColorStop(1, hexA(v.team.color, 0));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 1080, 1350);
-  ctx.textAlign = 'center'; ctx.fillStyle = '#8d8f99'; ctx.font = font(24, 700);
-  ctx.fillText('ENHYPEN MAMA GRAND PRIX · SEASON 2026', 540, 1300); ctx.textAlign = 'left';
+// Video formats: the spin is framed for where it will be posted.
+const FORMATS = {
+  story: {w: 1080, h: 1920, fill: .6, label: 'Story · Reel · TikTok'},
+  post: {w: 1080, h: 1350, fill: .745, label: 'Instagram post'},
+  square: {w: 1080, h: 1080, fill: .7, label: 'X post'},
+};
+function videoBackground(v, f) {
+  const {w, h} = f, c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d'), col = v.team.color;
+  ctx.fillStyle = '#0b0c0f'; ctx.fillRect(0, 0, w, h);
+  let g = ctx.createRadialGradient(w / 2, h * .5, 0, w / 2, h * .5, Math.max(w, h) * .65);
+  g.addColorStop(0, hexA(col, .34)); g.addColorStop(1, hexA(col, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  // Starry sky.
+  let seed = 7;
+  const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < w * h / 3500; i++) { ctx.fillStyle = `rgba(255,255,255,${.15 + rnd() * .5})`; ctx.beginPath(); ctx.arc(rnd() * w, rnd() * h, .6 + rnd() * 1.4, 0, Math.PI * 2); ctx.fill(); }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  const mid = w / 2, label = (text, y, size, weight, color, sp = 0) => {
+    ctx.font = font(size, weight); ctx.fillStyle = color;
+    const tw = [...text].reduce((a, ch) => a + ctx.measureText(ch).width + sp, -sp);
+    ctx.textAlign = 'left'; spaced(ctx, text, mid - tw / 2, y, sp); ctx.textAlign = 'center';
+  };
+  const who = `${v.username} · ${teamLabel(v.team, ' · ')}`;
+  if (f === FORMATS.story) {
+    // Top and bottom bands, clear of the platform UI.
+    if (logo.complete && logo.naturalWidth) { const lh = 70, lw = lh * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, mid - lw / 2, 150, lw, lh); }
+    label('ENHYPEN MAMA GRAND PRIX 2026', 290, 30, 700, '#d4d5db', 5);
+    label('CERTIFICATE OF PARTICIPATION', 340, 26, 600, '#9a9ca6', 6);
+    label(v.username, 1610, 64, 700, '#fff');
+    label(`${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1666, 32, 600, col);
+    label('Different Colors. Same finish line.', 1730, 28, 400, '#c9cad0');
+  } else if (f === FORMATS.square) {
+    label(who, h - 64, 30, 700, '#fff');
+    label('ENHYPEN MAMA GRAND PRIX 2026', 64, 24, 700, '#9a9ca6', 5);
+  } else {
+    label('ENHYPEN MAMA GRAND PRIX · SEASON 2026', h - 50, 24, 700, '#8d8f99');
+  }
+  ctx.textAlign = 'left';
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 let recording = false;
+async function recordSpin(v, f) {
+  // Records the on-screen renderer itself (one WebGL context: no second shader compile),
+  // resized to the video format for a few seconds behind a "Recording" overlay.
+  const type = videoType();
+  if (!type) throw new Error('unsupported');
+  recording = true;
+  const r = view.renderer, ratio = r.getPixelRatio();
+  stage.classList.add('recording');
+  const cam = new THREE.PerspectiveCamera(30, f.w / f.h, .1, 100);
+  cam.position.set(0, -.04, 2.634 / (f.fill * 2 * Math.tan(THREE.MathUtils.degToRad(15))));
+  const bg = videoBackground(v, f);
+  r.setPixelRatio(1); r.setSize(f.w, f.h, false);
+  view.state.rec = {camera: cam, background: bg};
+  const chunks = [];
+  try {
+    const recorder = new MediaRecorder(r.domElement.captureStream(30), {mimeType: type, videoBitsPerSecond: 8_000_000});
+    recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    const done = new Promise(resolve => { recorder.onstop = resolve; });
+    await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+    view.state.spin = {start: performance.now() + 400, duration: 4000};
+    recorder.start(250);
+    await new Promise(res => setTimeout(res, 4800));
+    recorder.stop(); await done;
+  } finally {
+    view.state.spin = null; view.state.rec = null;
+    view.state.ry = view.state.try = view.state.base = -.35 + Math.round((view.state.base + .35) / Math.PI) * Math.PI; view.state.last = performance.now();
+    r.setPixelRatio(ratio); view.resize(); bg.dispose();
+    stage.classList.remove('recording');
+    recording = false;
+  }
+  const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
+  return {blob: new Blob(chunks, {type: type.split(';')[0]}), ext};
+}
 $('lic-video').addEventListener('click', async () => {
   const v = ready(); if (!v || !view?.renderer || recording) return;
-  const type = videoType();
-  if (!type) { toast('error', 'Video not supported here', 'This browser cannot record video. Try Safari or Chrome.'); return; }
-  recording = true;
-  const button = $('lic-video'); const label = button.textContent;
+  const button = $('lic-video'), label = button.textContent;
   button.disabled = true; button.textContent = 'Recording…';
-  const canvas = document.createElement('canvas'); canvas.width = 1080; canvas.height = 1350;
-  canvas.style.cssText = 'position:fixed;left:-99999px;top:0;width:1080px;height:1350px';
-  document.body.append(canvas);
-  const rec = new THREE.WebGLRenderer({canvas, antialias: true, preserveDrawingBuffer: true});
-  rec.setPixelRatio(1); rec.setSize(1080, 1350, false); rec.outputColorSpace = THREE.SRGBColorSpace;
-  const cam = new THREE.PerspectiveCamera(30, 1080 / 1350, .1, 100); cam.position.set(0, -.12, 6.6);
-  const bg = videoBackground(v);
-  const chunks = [];
-  const recorder = new MediaRecorder(canvas.captureStream(30), {mimeType: type, videoBitsPerSecond: 8_000_000});
-  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  const done = new Promise(resolve => { recorder.onstop = resolve; });
-  const draw = () => { view.scene.background = bg; rec.render(view.scene, cam); view.scene.background = null; };
-  view.state.spin = {start: performance.now() + 400, duration: 4000, onFrame: draw};
-  recorder.start(250);
-  await new Promise(r => setTimeout(r, 4800));
-  recorder.stop(); await done;
-  view.state.spin = null; view.state.ry = view.state.try = view.state.base = -.35 + Math.round((view.state.base + .35) / Math.PI) * Math.PI; view.state.last = performance.now();
-  rec.dispose(); canvas.remove(); bg.dispose();
-  const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
-  download(new Blob(chunks, {type: type.split(';')[0]}), `emgp26-certificate-${slug(v)}.${ext}`);
-  toast('success', 'Video saved', ext === 'webm' ? 'Saved as WEBM: if Instagram refuses it, record it again from Safari or a recent Chrome.' : 'Find it in your downloads or Photos.');
-  button.disabled = false; button.textContent = label; recording = false;
+  try {
+    const {blob, ext} = await recordSpin(v, FORMATS.post);
+    download(blob, `emgp26-certificate-${slug(v)}.${ext}`);
+    toast('success', 'Video saved', ext === 'webm' ? 'Saved as WEBM: if Instagram refuses it, record it again from Safari or a recent Chrome.' : 'Find it in your downloads or Photos.');
+  } catch { toast('error', 'Video not supported here', 'This browser cannot record video. Try Safari or Chrome.'); recording = false; }
+  button.disabled = false; button.textContent = label;
 });
+
+// Share: record the spin framed for the chosen platform, then hand it to the share sheet.
+// Recording takes a few seconds, longer than browsers allow between a tap and sharing,
+// so the share sheet opens with a second tap ("Share now").
+const shareBox = $('lic-share');
+let shared = null;
+shareBox?.addEventListener('click', async e => {
+  const button = e.target.closest('button[data-format]'); if (!button) return;
+  const v = ready(); if (!v || !view?.renderer) return;
+  const f = FORMATS[button.dataset.format];
+  if (shared?.button === button) {
+    const file = new File([shared.blob], `emgp26-certificate-${slug(v)}-${button.dataset.format}.${shared.ext}`, {type: shared.blob.type});
+    if (navigator.canShare?.({files: [file]})) {
+      try { await navigator.share({files: [file], title: 'My EMGP26 certificate', text: 'Different Colors. Same finish line. #ENHYPEN #EMGP26'}); }
+      catch (err) { if (err?.name !== 'AbortError') { download(shared.blob, file.name); toast('info', 'Saved instead', 'Sharing was not possible, the video is in your downloads.'); } }
+    } else {
+      download(shared.blob, file.name);
+      toast('success', 'Video saved', `Post it from your gallery as ${f.label}.`);
+    }
+    return;
+  }
+  if (recording) return;
+  shareBox.querySelectorAll('button[data-format]').forEach(b => { b.disabled = true; b.classList.remove('ready'); b.querySelector('small').textContent = FORMATS[b.dataset.format].hint; });
+  button.querySelector('small').textContent = 'Preparing…';
+  try {
+    const {blob, ext} = await recordSpin(v, f);
+    shared = {button, blob, ext};
+    button.classList.add('ready'); button.querySelector('small').textContent = 'Ready · tap to share';
+  } catch { toast('error', 'Video not supported here', 'This browser cannot record video. Try Safari or Chrome.'); recording = false; shared = null; }
+  shareBox.querySelectorAll('button[data-format]').forEach(b => { b.disabled = false; });
+});
+form.addEventListener('input', () => { if (!shared) return; shared.button.classList.remove('ready'); shared.button.querySelector('small').textContent = FORMATS[shared.button.dataset.format].hint; shared = null; });
+FORMATS.story.hint = '9:16'; FORMATS.post.hint = '4:5'; FORMATS.square.hint = '1:1';
+
+// Embed: an iframe with only the 3D pass, for personal sites, Carrd, Notion…
+const FINISH_KEYS = Object.keys(FINISHES);
+function embedUrl(v) {
+  const q = new URLSearchParams({u: v.username, team: form.elements.team.value, level: String(v.level.index + 1), finish: form.elements.finish.value});
+  return `${location.origin}/crew-license/embed?${q}`;
+}
+$('lic-embed')?.addEventListener('click', () => {
+  const v = ready(); if (!v) return;
+  const box = $('lic-embed-box'); box.hidden = false;
+  const code = `<iframe src="${embedUrl(v)}" width="360" height="480" style="border:0;max-width:100%" loading="lazy" allow="gyroscope; accelerometer" title="EMGP26 certificate of ${v.username}"></iframe>`;
+  $('lic-embed-code').value = code; $('lic-embed-code').select();
+});
+$('lic-embed-copy')?.addEventListener('click', async () => {
+  const field = $('lic-embed-code');
+  try { await navigator.clipboard.writeText(field.value); toast('success', 'Embed code copied', 'Paste it into your site, Carrd or Notion (embed block).'); }
+  catch { field.select(); toast('info', 'Copy the code', 'Select the code and copy it.'); }
+});
+const embedMode = location.pathname.endsWith('/embed');
+if (embedMode) {
+  // Fill the form from the link and show only the card.
+  document.body.classList.add('embed');
+  const q = new URLSearchParams(location.search);
+  form.elements.username.value = (q.get('u') || '').slice(0, 24);
+  if (TEAMS[q.get('team')]) form.elements.team.value = q.get('team');
+  const lv = Number(q.get('level')); if (lv >= 1 && lv <= LEVELS.length) form.elements.level.value = String(lv - 1);
+  if (FINISH_KEYS.includes(q.get('finish'))) form.elements.finish.value = q.get('finish');
+}
 
 // Phone motion (iOS asks for permission after a tap) ---------------------------------
 function onOrientation(e) {

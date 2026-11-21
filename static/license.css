@@ -52,3 +52,29 @@ body{margin:0;min-height:100vh;font-family:var(--lic-font);color:#f4f4f6;backgro
   .lic-top,.lic-main,.lic-footer{padding-left:16px;padding-right:16px}
   .lic-tag{display:none}
 }
+
+/* Share by platform */
+.lic-share{border:0;padding:0;margin:16px 0 0;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.lic-share legend{font-size:14px;font-weight:600;color:#a9abb4;margin-bottom:8px;padding:0}
+.lic-share button{font:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:64px;padding:8px 6px;border-radius:10px;cursor:pointer;background:transparent;color:#f4f4f6;border:1px solid #3a3e4b;text-align:center;font-size:13.5px;font-weight:700;line-height:1.2}
+.lic-share button small{font-size:12px;font-weight:600;color:#8d8f99}
+.lic-share button.ready{border-color:var(--red);background:#e1060022}
+.lic-share button.ready small{color:#ff8a80}
+.lic-share button:disabled{opacity:.5;cursor:wait}
+.lic-embed-btn{margin-top:16px;width:100%;font:inherit;font-size:15px;font-weight:700;min-height:44px;border-radius:10px;cursor:pointer;background:transparent;color:#f4f4f6;border:1px dashed #3a3e4b}
+.lic-embed-box{margin-top:10px}
+.lic-embed-box textarea{width:100%;font:12.5px/1.45 ui-monospace,Menlo,monospace;color:#d4d5db;background:#0b0c0f;border:1px solid #333744;border-radius:10px;padding:10px;resize:vertical}
+.lic-embed-box button{margin-top:8px;width:100%;font:inherit;font-weight:700;min-height:44px;border-radius:10px;border:1px solid var(--red);background:var(--red);color:#fff;cursor:pointer}
+.lic-get{display:none}
+
+/* Embed mode (/crew-license/embed): only the card */
+html:has(body.embed),body.embed{background:transparent!important;min-height:0}
+body.embed .lic-top,body.embed .lic-intro,body.embed .lic-form,body.embed .lic-footer,body.embed .lic-stage figcaption,body.embed .lic-tilt{display:none}
+body.embed .lic-main{padding:0;max-width:none}
+body.embed .lic-layout{display:block}
+body.embed .lic-stage{gap:6px}
+body.embed .lic-3d{aspect-ratio:auto;height:calc(100vh - 30px);max-height:none}
+body.embed .lic-get{display:block;font-size:12px;color:#8d8f99;text-decoration:none;letter-spacing:.5px}
+body.embed .lic-get:hover{color:#fff}
+
+.lic-3d.recording::after{content:"Recording your video…";position:absolute;inset:0;z-index:2;display:grid;place-items:center;font-weight:700;color:#d4d5db;background:radial-gradient(circle,#1d2026,#0b0c0f 70%);border-radius:18px}

@@ -62,7 +62,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        if 'Content-Security-Policy' not in (extra or {}):
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         for key, value in (extra or {}).items():
             self.send_header(key, value)
         self.end_headers()
@@ -114,6 +115,9 @@ class Handler(BaseHTTPRequestHandler):
             if result:
                 status, body, mime, *headers = result
                 return self.reply(status, body, mime, {'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer', **(headers[0] if headers else {})})
+        if path == '/crew-license/embed':  # the only page that other sites may frame
+            return self.reply(200, (STATIC / 'license.html').read_bytes(), 'text/html; charset=utf-8',
+                              {'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'self'"})
         if path in public:
             filename, mime = public[path]
             return self.reply(200, (STATIC / filename).read_bytes(), mime if mime.startswith(('image/', 'font/')) else mime + '; charset=utf-8')
