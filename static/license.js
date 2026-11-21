@@ -205,19 +205,6 @@ function certificateTexture(ctx, c) {
   // Paper grain.
   ctx.save(); ctx.globalAlpha = .05; ctx.globalCompositeOperation = 'overlay';
   ctx.fillStyle = grainPattern(ctx); ctx.scale(.5, .5); ctx.fillRect(0, 0, PW * 2, PH * 2); ctx.restore();
-  // Guilloche frame and microtext.
-  const m = 18, b = 16;
-  ctx.save();
-  guillocheBand(ctx, m + b, m, PW - 2 * (m + b), b, hexA(c, .28), 26, 0);
-  guillocheBand(ctx, m + b, PH - m - b, PW - 2 * (m + b), b, hexA(c, .28), 26, 1);
-  guillocheBand(ctx, m, m + b, b, PH - 2 * (m + b), hexA(c, .28), 38, .5);
-  guillocheBand(ctx, PW - m - b, m + b, b, PH - 2 * (m + b), hexA(c, .28), 38, 1.5);
-  roundRect(ctx, m + b + 6, m + b + 6, PW - 2 * (m + b + 6), PH - 2 * (m + b + 6), 26); ctx.strokeStyle = hexA(c, .25); ctx.lineWidth = 1; ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,.16)'; ctx.font = font(7, 700);
-  const micro = 'ENHYPEN MAMA GRAND PRIX 2026 · SIX TEAMS ONE ENHYPEN · ';
-  let line = ''; while (ctx.measureText(line).width < PW) line += micro;
-  ctx.fillText(line, m + b + 14, PH - m - b - 10);
-  ctx.restore();
 }
 function seal(ctx, x, y, r, c) {
   // Embossed rosette seal.
@@ -304,7 +291,6 @@ function drawPassFront(ctx, v) {
   let bx = PW - 356, seed = [...no].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0;
   ctx.fillStyle = '#e8e8ee';
   while (bx < PW - 60) { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; const w = 2 + (seed % 3) * 2; ctx.fillRect(bx, PH - 124, w, 72); bx += w + 3 + ((seed >>> 8) % 3) * 2; }
-  seal(ctx, 416, PH - 90, 42, c);
   passFoil(ctx); ctx.restore(); passEdge(ctx, c);
 }
 function trophy(ctx, x, y, s, color) {
@@ -399,25 +385,44 @@ function createView() {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 1, .1, 100);
-  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-  const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(2, 3, 6); scene.add(key);
-  const glint = new THREE.PointLight(0xffffff, 6, 12, 1.5); glint.position.set(0, 0, 3); scene.add(glint);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+  // A small studio for reflections: softboxes the glossy laminate and the edges reflect.
+  const studio = new THREE.Scene(); studio.background = new THREE.Color(0x07080a);
+  const box = (w, h, x, y, z, color, intensity) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({color: new THREE.Color(color).multiplyScalar(intensity), side: THREE.DoubleSide}));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); studio.add(m);
+  };
+  box(6, 1.2, 0, 5, 3, 0xffffff, 3); box(1.2, 5, -6, 0, 2, 0xffffff, 1.6); box(1.2, 5, 6, 1, 2, 0xffe8d0, 1.4); box(8, 1, 0, -5, 4, 0x9fb4ff, .6);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(studio, .04).texture;
+  scene.add(new THREE.AmbientLight(0xffffff, .55));
+  const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(2, 3, 6); scene.add(key);
+  const glint = new THREE.PointLight(0xffffff, 5, 12, 1.5); glint.position.set(0, 0, 3); scene.add(glint);
 
-  const W = 1.8, H = W * PH / PW, D = .03, R = W * PRADIUS / PW;
+  const W = 1.8, H = W * PH / PW, D = .026, B = .007, R = W * PRADIUS / PW;
   const shape = roundedShape(W, H, R);
   const card = new THREE.Group(); scene.add(card);
-  const sideGeo = new THREE.ExtrudeGeometry(shape, {depth: D, bevelEnabled: false, curveSegments: 12});
+  // Thick laminated card with rounded (bevelled) edges that catch the light.
+  const sideGeo = new THREE.ExtrudeGeometry(roundedShape(W - 2 * B, H - 2 * B, R - B), {depth: D, bevelEnabled: true, bevelThickness: B, bevelSize: B, bevelSegments: 4, curveSegments: 16});
   sideGeo.translate(0, 0, -D / 2);
-  const edge = new THREE.MeshStandardMaterial({color: 0x3a3d45, metalness: .85, roughness: .3});
+  const edge = new THREE.MeshPhysicalMaterial({color: 0x2a2c33, metalness: .6, roughness: .25, clearcoat: 1, clearcoatRoughness: .1});
   card.add(new THREE.Mesh(sideGeo, [new THREE.MeshBasicMaterial({visible: false}), edge]));
 
   const tex = canvas => { const t = new THREE.CanvasTexture(canvas); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t; };
   const frontTex = tex(front), backTex = tex(back);
   const face = faceGeometry(shape, W, H);
-  const frontMesh = new THREE.Mesh(face, new THREE.MeshStandardMaterial({map: frontTex, roughness: .42, metalness: .12}));
-  frontMesh.position.z = D / 2 + .0006; card.add(frontMesh);
-  const backMesh = new THREE.Mesh(face, new THREE.MeshStandardMaterial({map: backTex, roughness: .5, metalness: .1}));
-  backMesh.rotation.y = Math.PI; backMesh.position.z = -D / 2 - .0006; card.add(backMesh);
+  // Printed faces under a glossy clear coat (reflects the studio when the card turns).
+  const faceMat = map => new THREE.MeshPhysicalMaterial({map, roughness: .5, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .55});
+  const faceZ = D / 2 + B + .0006;
+  const frontMesh = new THREE.Mesh(face, faceMat(frontTex)); frontMesh.position.z = faceZ; card.add(frontMesh);
+  const backMesh = new THREE.Mesh(face, faceMat(backTex)); backMesh.rotation.y = Math.PI; backMesh.position.z = -faceZ; card.add(backMesh);
+  // Soft shadow on an invisible floor behind the card: it shifts and blurs as the card turns.
+  const sh = document.createElement('canvas'); sh.width = sh.height = 256;
+  const shx = sh.getContext('2d'), sg = shx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  sg.addColorStop(0, 'rgba(0,0,0,.55)'); sg.addColorStop(.6, 'rgba(0,0,0,.18)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+  shx.fillStyle = sg; shx.fillRect(0, 0, 256, 256);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(W * 1.5, H * 1.25), new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false}));
+  shadow.position.set(0, -.12, -.9); scene.add(shadow);
 
   // Holographic foil: a rainbow that moves with the viewing angle.
   const holo = new THREE.ShaderMaterial({
@@ -452,7 +457,7 @@ function createView() {
         gl_FragColor = vec4(col * a, a);
       }`,
   });
-  const holoMesh = new THREE.Mesh(face, holo); holoMesh.position.z = D / 2 + .0012; card.add(holoMesh);
+  const holoMesh = new THREE.Mesh(face, holo); holoMesh.position.z = faceZ + .0006; card.add(holoMesh);
 
   // Interaction: drag to turn, flip, phone motion, idle sway.
   const state = {ry: -.35, rx: .12, try: -.35, trx: .12, base: -.35, flip: 0, dragging: false, last: 0, vx: 0, motion: null, spin: null};
@@ -498,6 +503,13 @@ function createView() {
       state.rx += (state.trx - state.rx) * Math.min(dt * 8, 1);
       card.rotation.set(state.rx, state.ry, 0);
     }
+    // Float and shadow follow the card.
+    card.position.y = reduced ? 0 : Math.sin(t * 1.3) * .025;
+    const turn = Math.abs(Math.cos(card.rotation.y));
+    shadow.position.x = -Math.sin(card.rotation.y) * .35;
+    shadow.position.y = -.14 - card.position.y * 1.5 + card.rotation.x * .2;
+    shadow.scale.set(.35 + .65 * turn, 1, 1);
+    shadow.material.opacity = .55 + .45 * turn;
     renderer.render(scene, camera);
     if (state.spin?.onFrame) state.spin.onFrame();
     requestAnimationFrame(frame);
