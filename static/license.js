@@ -168,20 +168,16 @@ function panelPath(ctx) {
   ctx.lineTo(tx, y1); ctx.lineTo(x0 + r, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
   ctx.lineTo(x0, y0 + r); ctx.quadraticCurveTo(x0, y0, x0 + r, y0); ctx.closePath();
 }
-// Radio pass: the step goes up instead of down, over a diamond lattice instead of the parquet.
+// Radio pass: the step goes up instead of down, over radio waves (concentric arcs) instead of the parquet.
 const RADIO_DECO = [[0, 740], [700, 740], [860, 580], [CW, 580]];
 function radioLine(ctx, dy) { ctx.beginPath(); RADIO_DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + dy) : ctx.moveTo(x, y + dy)); }
 function radioWaves(ctx, colour) {
   ctx.save(); ctx.beginPath(); RADIO_DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + 26) : ctx.moveTo(x, y + 26));
   ctx.lineTo(CW, CH); ctx.lineTo(0, CH); ctx.closePath(); ctx.clip();
   ctx.strokeStyle = colour; ctx.lineWidth = 2.2;
-  const d = 46;   // diamonds: two sets of diagonals, with a dot in every other diamond
-  for (let k = -CH; k < CW + CH; k += d) {
-    ctx.beginPath(); ctx.moveTo(k, 500); ctx.lineTo(k + CH, 500 + CH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(k, 500); ctx.lineTo(k - CH, 500 + CH); ctx.stroke();
-  }
-  ctx.fillStyle = colour;
-  for (let y = 500 + d / 2; y < CH; y += d) for (let x = ((y - 500) / d % 2 ? d / 2 : 0); x < CW; x += d) { ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill(); }
+  // Radio waves: concentric arcs spreading from the bottom corner by the tab.
+  const cx = CW - AB - TAB.w - 40, cy = CH + 30;
+  for (let r = 40; r < 1500; r += 30) { ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, Math.PI * 2); ctx.stroke(); }
   ctx.restore();
 }
 const passPattern = (ctx, v, colour) => v.tier === 'staff' ? radioWaves(ctx, colour) : parquet(ctx, colour);
