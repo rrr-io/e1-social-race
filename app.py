@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import storage
 import collab
+import crew
 import race
 from collectors import CollectionError, Target, collect, normalize_url
 
@@ -83,6 +84,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(302, '', extra={'Location': redirects[path]})
         if path == '/api/race':
             return self.reply(200, race.read())
+        if path == '/api/crew':  # certificate page: nickname search in the crew list
+            query = parse_qs(urlsplit(self.path).query)
+            if 'id' in query:
+                entry = crew.get(query['id'][0])
+                return self.reply(200, entry) if entry else self.reply(404, {'error': 'Not in the crew list'})
+            return self.reply(200, crew.search(query.get('q', [''])[0]))
         public = {'/': ('race.html', 'text/html'), '/race.js': ('race.js', 'application/javascript'), '/race.css': ('race.css', 'text/css'),
                   '/common.js': ('common.js', 'application/javascript'), '/report.js': ('report.js', 'application/javascript'),
                   '/collab-report.js': ('collab-report.js', 'application/javascript'),
@@ -171,6 +178,19 @@ class Handler(BaseHTTPRequestHandler):
             logging.exception('Collab upload failure')
             self.reply(500, {'error': 'Internal server error'})
 
+    def crew_upload(self):
+        # The crew list for the certificates, as raw CSV text (see LICENSE_CARD.md).
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= crew.MAX_UPLOAD:
+                raise ValueError('The CSV is empty or larger than 1 MB')
+            return self.reply(200, crew.replace(self.rfile.read(size)))
+        except (ValueError, TypeError, UnicodeDecodeError) as exc:
+            self.reply(400, {'error': str(exc)})
+        except Exception:
+            logging.exception('Crew list upload failure')
+            self.reply(500, {'error': 'Internal server error'})
+
     def report_post(self):
         # Review actions from a batch report link: no sign-in, the secret link names the one batch that can be changed.
         try:
@@ -201,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {'error': 'Origin not allowed. Check PUBLIC_ORIGIN.'})
         if urlsplit(self.path).path in collab.RAW_POSTS:
             return self.collab_upload()
+        if urlsplit(self.path).path == '/api/crew':
+            return self.crew_upload()
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.reply(415, {'error': 'Use application/json'})
         try:

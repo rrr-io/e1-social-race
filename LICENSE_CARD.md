@@ -2,11 +2,11 @@
 
 Live at `https://emgp26-certificates.enhypenvoting.com` (same container, see "Own subdomain").
 
-A public page where a crew member enters **username, team and crew licence level** and gets their ENHYPEN MAMA Grand Prix crew licence as a 3D card, in the style of the e1.ensite.org licence.
+A public page where a crew member types their **E1 username**, picks it from the crew list (team, crew licence level and role come from the list) and gets their ENHYPEN MAMA Grand Prix crew licence as a 3D card, in the style of the e1.ensite.org licence.
 
 - Page: `/crew-license` (`static/license.html`, `static/license.css`, `static/license.js`).
-- No backend, no database, nothing uploaded: the card is drawn in the browser.
-- Levels: the 10 steps of the progression ladder and the 8 prestige distinctions (list in `LEVELS`, `license.js`). The level is self-declared, there is no verification.
+- The card is drawn in the browser; the only server part is the crew list search (`crew.py`).
+- Levels: the 10 steps of the progression ladder and the 8 prestige distinctions (list in `LEVELS`, `license.js` and `crew.py`).
 - Teams: Jaybull Racing (Jay), McJakey (Jake), Hoonrari (Sunghoon), Alpinoo (Sunoo), Meowcedes (Jungwon), Rikston Drift (Ni-ki).
 - The 3D object is the **certificate of participation**: a paddock-pass style card in the team colour. Front: "Certificate of participation", the crew licence in a clear sleeve, a statement with username, team and level, access zones, certificate number, date and barcode. Back: ENHYPEN MAMA Grand Prix and ENHYPEN's 2026 MAMA Awards (`AWARDS` in `license.js`).
 - Crew licence: one of the 18 licence designs (`static/licences/01.png` … `18.png`, 1600 x 900, level name already printed, name and team left blank) with the holder's username and team drawn on top, in the colours of that design (`INK` in `license.js`).
@@ -14,6 +14,24 @@ A public page where a crew member enters **username, team and crew licence level
 - Downloads: **certificate** (pass front, 2050 x 3000 PNG), **crew licence** (3200 x 1800 PNG) and **video** (4-second spin of the pass, 1080 x 1350, recorded in the browser: MP4 on Safari and recent Chrome, WEBM elsewhere).
 - Font: Titillium Web (SIL OFL, `static/fonts/`).
 - To change a design, replace its PNG in `static/licences/` (same size, keep the name/team area empty) and, if the text colour changes, its entry in `INK`.
+
+## Crew list
+
+`crew.csv` in the data volume (next to the database, `/app/data/crew.csv`; or the path in `CREW_CSV`). It is not in git.
+
+- Columns: `username,team,level,role,x,donor`. `team` is the scuderia (Jaybull Racing, McJakey, Hoonrari, Alpinoo, Meowcedes, Rikston Drift, Independent Crew); "Team JAKE" style names also work, so the raw E1 export (`E1 username`, `Team`, `Crew Licence level`) can be uploaded as it is (without roles).
+- `role`: empty, or one of Team Manager, Team Captain, Co-Team Captain, Race Engineer, E1 System Steward, Manual Steward, Media Crew (descriptions in `ROLES`, `license.js`). Role holders get the role in chrome lettering instead of the access zones (real metal letters with a travelling glint in 3D).
+- `x` (optional): X handles separated by spaces, or a `Social link` column (the raw export) from which the x.com handles are taken. After picking their name, a crew member can show one of their handles (as @handle) on the certificate instead of the E1 username; the project account and typo-short handles next to a real one are ignored.
+- `donor` (optional): `yes` (or x, 1) for crew members who donated to the campaign. They get a holographic "Campaign supporter" sticker above the QR code, with an embossed laurel wreath and star (in 3D a raised holo sticker whose rainbow moves with the angle).
+- The same username and team twice is merged (higher level kept). Usernames used more than once show the scuderia in the search, plus the level when the team is the same too.
+- Upload or replace (admin login; the whole file is checked first, the old list stays if it is invalid):
+
+  ```sh
+  curl -u admin:PASSWORD -H 'Content-Type: text/csv' --data-binary @emgp26-crew.csv https://emgp26-certificates.enhypenvoting.com/api/crew
+  ```
+
+- `GET /api/crew?q=…` (up to 8 matches: exact, then starts with, then contains; a leading @ is ignored), `GET /api/crew?id=…` (one entry; the embed code uses it, so name, team, level and role cannot be changed in the link).
+- Without a list the page falls back to choosing team and level by hand.
 
 ## Own subdomain
 

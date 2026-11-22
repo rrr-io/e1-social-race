@@ -24,14 +24,21 @@
   <section class="lic-intro">
     <h1>Crew, it’s time to get your certificate</h1>
     <p class="lic-lead">We raced side by side, vote after vote, and carried ENHYPEN all the way to the chequered flag. This certificate is for every lap you ran with us.</p>
-    <p>Enter your username, team and crew licence to get your certificate of participation. Turn it around, then download it, your crew licence or a short video for your stories.</p>
+    <p>Type your E1 username and pick yourself from the crew list to get your certificate of participation. Turn it around, then download it, your crew licence or a short video for your stories.</p>
   </section>
 
   <div class="lic-layout">
     <form id="lic-form" class="lic-form" novalidate>
-      <label>Username
-        <input name="username" required maxlength="24" autocomplete="nickname" autocapitalize="none" spellcheck="false" placeholder="e.g. awannv">
-      </label>
+      <div class="lic-combo">
+        <label for="lic-user">Username</label>
+        <input id="lic-user" name="username" required maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Start typing your E1 username"
+               role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="lic-suggest">
+        <ul id="lic-suggest" class="lic-suggest" role="listbox" aria-label="Crew members" hidden></ul>
+        <small class="field-hint" id="lic-user-hint">Your username on e1.ensite.org. Pick it from the list: team, licence and role are filled in for you.</small>
+      </div>
+      <div class="lic-picked" id="lic-picked" hidden></div>
+      <fieldset class="lic-name" id="lic-name" hidden><legend>Name on the certificate</legend></fieldset>
+      <div class="lic-manual" id="lic-manual" hidden>
       <label>Team
         <select name="team" required>
           <option value="">Choose your team</option>
@@ -48,6 +55,7 @@
         <select name="level" required id="lic-level"><option value="">Choose your level</option></select>
         <small class="field-hint">The level you reached, as shown on e1.ensite.org.</small>
       </label>
+      </div>
       <label>Finish
         <select name="finish">
           <option value="none">None</option>

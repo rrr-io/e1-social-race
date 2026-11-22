@@ -20,6 +20,11 @@ const TEAMS = {
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
 };
 const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
+// Coordinator roles from the E1 glossary: what each one did, shown under the role on the certificate.
+const ROLES = {
+  'Team Manager': 'Team management', 'Team Captain': 'Leader', 'Co-Team Captain': 'Co-leader', 'Race Engineer': 'Race strategist',
+  'E1 System Steward': 'Race steward · Voting proof checker', 'Manual Steward': 'Race steward · Proof encoder & checker', 'Media Crew': 'Race steward · Media',
+};
 // The progression ladder and the prestige distinctions of e1.ensite.org.
 const LEVELS = [
   ['Paddock Rookie', 0], ['Race Ready', 5], ['Fast Lane', 10], ['Pit Lane Pro', 20], ['Redline Ace', 25],
@@ -40,11 +45,14 @@ for (const [label, tier] of [['Progression ladder', 'ladder'], ['Prestige distin
   }
 }
 
+// The crew list (server side): once it is loaded, a crew member only picks the username and the rest comes from it.
+let crewLoaded = false, picked = null, shownName = '';   // shownName: an X handle chosen instead of the username
 function values() {
-  const username = form.elements.username.value.trim().replace(/^@/, '');
+  const username = shownName ? `@${shownName}` : (picked ? picked.username : form.elements.username.value).trim().replace(/^@/, '');
   const team = TEAMS[form.elements.team.value] || null;
-  const level = LEVELS[Number(form.elements.level.value)] || null;
-  return {username, team, level, complete: Boolean(username && team && form.elements.level.value !== '')};
+  const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
+  const role = picked?.role || '', donor = Boolean(picked?.donor);
+  return {username, key: picked?.username || username, team, level, role, donor, complete: Boolean(username && team && level && (!crewLoaded || picked))};
 }
 
 // 2D card drawing ------------------------------------------------------------------
@@ -286,13 +294,22 @@ function drawPassFront(ctx, v, withLicence = true) {
     {text: ' in the ENHYPEN MAMA Grand Prix 2026, reaching the ', color: '#c9cad0', weight: 400},
     {text: v.level ? v.level.name : 'your', color: '#fff', weight: 700}, {text: ' crew licence.', color: '#c9cad0', weight: 400},
   ], 56, sy + sh + 66, PW - 112, 44);
-  // Access zones.
-  let zx = 56; y += 40;
-  for (const z of ['PIT', 'GRID', 'PADDOCK', 'GARAGE']) {
-    ctx.font = `italic ${font(24, 900)}`; const w = ctx.measureText(z).width + 40;
-    roundRect(ctx, zx, y, w, 46, 10); ctx.fillStyle = hexA(c, .14); ctx.fill(); ctx.strokeStyle = hexA(c, .7); ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = c; ctx.fillText(z, zx + 20, y + 32); zx += w + 12;
+  if (v.role) {
+    // Coordinators: the role in chrome lettering (real metal letters in 3D).
+    roleSlot = {x: 56, y: y + 30};
+    drawRoleBlock(ctx, v, roleSlot.y, withLicence);
+  } else {
+    roleSlot = null;
+    // Access zones.
+    let zx = 56; y += 40;
+    for (const z of ['PIT', 'GRID', 'PADDOCK', 'GARAGE']) {
+      ctx.font = `italic ${font(24, 900)}`; const w = ctx.measureText(z).width + 40;
+      roundRect(ctx, zx, y, w, 46, 10); ctx.fillStyle = hexA(c, .14); ctx.fill(); ctx.strokeStyle = hexA(c, .7); ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = c; ctx.fillText(z, zx + 20, y + 32); zx += w + 12;
+    }
   }
+  // Donors: a holographic supporter sticker on the corner (its own holo sticker in 3D).
+  if (v.donor && withLicence) drawSticker(ctx, STICKER.x, STICKER.y, STICKER.r, 'print');
   // Certificate number, date, barcode.
   const no = licenceNumber(v);
   ctx.fillStyle = '#8d8f99'; ctx.font = font(20, 700);
@@ -309,6 +326,101 @@ function drawPassFront(ctx, v, withLicence = true) {
     ctx.textAlign = 'left';
   }
   ctx.restore(); passEdge(ctx, c);
+}
+let roleSlot = null;
+function sparkle(ctx, x, y, r, a = 1) {
+  // A four-point star glint.
+  ctx.save(); ctx.translate(x, y); ctx.globalAlpha = a;
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r * .45); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r * .45, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath();
+  for (let i = 0; i < 8; i++) { const a2 = i * Math.PI / 4, rr = i % 2 ? r * .1 : r; ctx.lineTo(Math.cos(a2) * rr, Math.sin(a2) * rr); }
+  ctx.fill(); ctx.restore();
+}
+function chromeFill(ctx, y0, y1) {
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  [[0, '#ffffff'], [.4, '#dfe2e8'], [.52, '#8a8f99'], [.6, '#cfd3da'], [.82, '#f7f8fa'], [1, '#a5aab3']].forEach(([o, col]) => g.addColorStop(o, col));
+  return g;
+}
+const spacedWidth = (ctx, t, sp) => [...t].reduce((a, ch) => a + ctx.measureText(ch).width + sp, -sp);
+// The role title in chrome: top of the 60 px band at y (logical pixels). Returns its width.
+const ROLE_SIZE = 38, ROLE_SP = 5;
+function drawRoleTitle(ctx, x, y, v) {
+  const title = v.role.toUpperCase();
+  let size = ROLE_SIZE; ctx.font = font(size, 700);
+  while (spacedWidth(ctx, title, ROLE_SP) > PW - 112 && size > 24) { size -= 2; ctx.font = font(size, 700); }
+  ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; spaced(ctx, title, x, y + 47, ROLE_SP);          // soft drop
+  ctx.fillStyle = chromeFill(ctx, y + 47 - size * .74, y + 47); spaced(ctx, title, x, y + 45, ROLE_SP);
+  ctx.restore();
+  return spacedWidth(ctx, title, ROLE_SP);
+}
+function drawRoleBlock(ctx, v, y, withTitle) {
+  // CREW ROLE ——— (hairline) / TITLE / description: quiet, engraved-certificate style.
+  const c = v.team?.color || '#9a9ca6', desc = (ROLES[v.role] ?? '').toUpperCase();
+  ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.fillStyle = c; ctx.font = font(14, 700); spaced(ctx, 'CREW ROLE', 56, y + 12, 4);
+  const end = v.donor ? STICKER.x - STICKER.r - 40 : PW - 56;   // keep clear of the supporter sticker
+  const lx = 56 + spacedWidth(ctx, 'CREW ROLE', 4) + 16, line = ctx.createLinearGradient(lx, 0, end, 0);
+  line.addColorStop(0, 'rgba(230,233,238,.55)'); line.addColorStop(1, 'rgba(230,233,238,0)');
+  ctx.fillStyle = line; ctx.fillRect(lx, y + 7, end - lx, 1.2);
+  if (desc) { ctx.fillStyle = '#a9adb6'; ctx.font = font(14, 600); spaced(ctx, desc, 56, y + 92, 3); }
+  ctx.restore();
+  if (withTitle) {
+    const w = drawRoleTitle(ctx, 54, y + 18, v);
+    ctx.save(); sparkle(ctx, 54 + w - 6, y + 32, 15, .95); ctx.restore();
+  }
+}
+// Supporter sticker (donors): holographic foil above the QR code, with an embossed laurel wreath and star.
+const STICKER = {x: PW - 56 - 52, y: PH - 52 - 104 - 26 - 46, r: 46};
+function wreath(ctx, r) {
+  // Laurel: two branches of leaves around a five-point star.
+  for (const side of [-1, 1]) {
+    ctx.save(); ctx.scale(side, 1);
+    ctx.beginPath(); ctx.arc(0, 0, r * .4, Math.PI * .6, Math.PI * 1.32); ctx.lineWidth = r * .028; ctx.stroke();
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI * .64 + i * Math.PI * .125, px = Math.cos(a) * r * .4, py = Math.sin(a) * r * .4;
+      ctx.save(); ctx.translate(px, py); ctx.rotate(a + Math.PI * .5 + .5);
+      ctx.beginPath(); ctx.ellipse(0, -r * .07, r * .04, r * .085, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+    ctx.restore();
+  }
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .11 : r * .25; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+  ctx.closePath(); ctx.fill();
+}
+function stickerMarks(ctx, r, color) {
+  // Rings, ring text and the wreath, in one colour (used for the ink, the emboss and the 3D bump).
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.1;
+  for (const rr of [r * .86, r * .57]) { ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.font = font(r * .19, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const ring = 'CAMPAIGN SUPPORTER ★ EMGP 2026 ★ ', step = Math.PI * 2 / ring.length;
+  [...ring].forEach((ch, i) => { ctx.save(); ctx.rotate(-Math.PI / 2 + i * step); ctx.translate(0, -r * .715); ctx.fillText(ch, 0, 0); ctx.restore(); });
+  wreath(ctx, r);
+}
+function drawSticker(ctx, x, y, r, mode) {
+  // mode: 'print' (flat PNG, with a shadow), 'texture' (3D colour map), 'height' (3D bump: marks raised).
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-.12);
+  const edge = () => { ctx.beginPath(); for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2, rr = r * (1 - .03 * (1 + Math.cos(a * 24))); ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); };
+  if (mode === 'height') {
+    edge(); ctx.fillStyle = '#7a7a7a'; ctx.fill(); stickerMarks(ctx, r, '#fff'); ctx.restore(); return;
+  }
+  if (mode === 'print') { ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4; edge(); ctx.fillStyle = '#ddd'; ctx.fill(); ctx.restore(); }
+  edge(); ctx.save(); ctx.clip();
+  // Holographic foil: a conic rainbow with glitter; the 3D sticker moves it with the light.
+  const g = ctx.createConicGradient(.6, 0, 0);
+  ['#e9dcff', '#cfe6ff', '#d9fbea', '#fbf1d2', '#f6dbe9', '#dcd8ff', '#cdeff8', '#e9dcff'].forEach((col, i, a) => g.addColorStop(i / (a.length - 1), col));
+  ctx.fillStyle = g; ctx.fillRect(-r, -r, r * 2, r * 2);
+  const sheen = ctx.createLinearGradient(-r, -r, r, r); sheen.addColorStop(.3, 'rgba(255,255,255,0)'); sheen.addColorStop(.5, 'rgba(255,255,255,.6)'); sheen.addColorStop(.7, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen; ctx.fillRect(-r, -r, r * 2, r * 2);
+  let seed = 11; const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < 200; i++) { ctx.fillStyle = `rgba(255,255,255,${.3 + rnd() * .7})`; ctx.fillRect(-r + rnd() * r * 2, -r + rnd() * r * 2, 1.1, 1.1); }
+  ctx.restore();
+  // Embossed marks: shadow below-right, highlight above-left, a soft face on top.
+  ctx.save(); ctx.translate(.9, 1.1); stickerMarks(ctx, r, 'rgba(60,52,92,.55)'); ctx.restore();
+  ctx.save(); ctx.translate(-.7, -.8); stickerMarks(ctx, r, 'rgba(255,255,255,.95)'); ctx.restore();
+  stickerMarks(ctx, r, 'rgba(150,140,185,.55)');
+  ctx.restore();
 }
 function trophy(ctx, x, y, s, color) {
   ctx.save(); ctx.translate(x - s / 2, y - s / 2); ctx.scale(s / 48, s / 48); ctx.fillStyle = color;
@@ -353,7 +465,7 @@ function drawPassBack(ctx, v) {
 const issued = new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Seoul', day: '2-digit', month: 'short', year: 'numeric'}).format(new Date()).toUpperCase();
 function licenceNumber(v) {
   let h = 2166136261;
-  for (const ch of `${(v.username || '').toLowerCase()}|${v.team?.name || ''}`) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  for (const ch of `${(v.key || '').toLowerCase()}|${v.team?.name || ''}`) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; }
   return `E1-26-${String(h % 10000).padStart(4, '0')}${'ABCDEFGHJKLMNPRSTUVWXYZ'[(h >>> 14) % 23]}`;
 }
 
@@ -361,12 +473,20 @@ const licence = document.createElement('canvas'); licence.width = CW * SCALE; li
 const front = document.createElement('canvas'); front.width = PW * PSCALE; front.height = PH * PSCALE;
 const back = document.createElement('canvas'); back.width = PW * PSCALE; back.height = PH * PSCALE;
 const frontBase = document.createElement('canvas'); frontBase.width = front.width; frontBase.height = front.height;
+// The role plate of the coordinators, drawn on its own for the 3D metal plate.
+const ROLE_W = PW - 112, ROLE_H = 60;
+const STICK = 2 * STICKER.r + 8;
+const stickerCanvas = document.createElement('canvas'); stickerCanvas.width = stickerCanvas.height = STICK * PSCALE;
+const stickerRelief = document.createElement('canvas'); stickerRelief.width = stickerRelief.height = STICK * PSCALE;
+const stickerHeight = document.createElement('canvas'); stickerHeight.width = stickerHeight.height = STICK * PSCALE;
+const roleCanvas = document.createElement('canvas'); roleCanvas.width = ROLE_W * PSCALE; roleCanvas.height = ROLE_H * PSCALE;
 // Where the licence sits on the pass (logical pass pixels), shared by the 2D drawing and the 3D plate.
 const SLOT = (() => { const sx = 48, sy = 278, inner = PW - 96 - 36; return {x: sx + 18, y: sy + 18, w: inner, h: inner * CH / CW}; })();
 // Emboss: bright print (text, logo, zones, barcode) becomes a bump map, so it stands out in 3D.
 const HS = .5;
 const frontHeight = document.createElement('canvas'); frontHeight.width = PW * PSCALE * HS; frontHeight.height = PH * PSCALE * HS;
 const backHeight = document.createElement('canvas'); backHeight.width = frontHeight.width; backHeight.height = frontHeight.height;
+const roleHeight = document.createElement('canvas'); roleHeight.width = roleCanvas.width; roleHeight.height = roleCanvas.height;
 function heightFrom(src, dst) {
   const ctx = dst.getContext('2d', {willReadFrequently: true});
   ctx.clearRect(0, 0, dst.width, dst.height); ctx.drawImage(src, 0, 0, dst.width, dst.height);
@@ -401,7 +521,21 @@ async function paint() {
     ctx.setTransform(PSCALE, 0, 0, PSCALE, 0, 0); ctx.clearRect(0, 0, PW, PH);
     draw(ctx, v, arg);
   }
-  if (view?.renderer) { heightFrom(frontBase, frontHeight); heightFrom(back, backHeight); }
+  if (v.role) {
+    const rctx = roleCanvas.getContext('2d');
+    rctx.setTransform(PSCALE, 0, 0, PSCALE, 0, 0); rctx.clearRect(0, 0, ROLE_W, ROLE_H);
+    drawRoleTitle(rctx, 0, 0, v);
+  }
+  if (v.donor) {
+    const sctx = stickerCanvas.getContext('2d');
+    sctx.setTransform(PSCALE, 0, 0, PSCALE, 0, 0); sctx.clearRect(0, 0, STICK, STICK);
+    drawSticker(sctx, STICK / 2, STICK / 2, STICKER.r, 'texture');
+    const hctx = stickerRelief.getContext('2d');
+    hctx.setTransform(PSCALE, 0, 0, PSCALE, 0, 0); hctx.fillStyle = '#000'; hctx.fillRect(0, 0, STICK, STICK);
+    drawSticker(hctx, STICK / 2, STICK / 2, STICKER.r, 'height');
+    if (view?.renderer) heightFrom(stickerRelief, stickerHeight);
+  }
+  if (view?.renderer) { heightFrom(frontBase, frontHeight); heightFrom(back, backHeight); if (v.role) heightFrom(roleCanvas, roleHeight); }
   view?.update(v);
 }
 
@@ -474,6 +608,61 @@ function createView() {
   const licMesh = new THREE.Mesh(faceGeometry(licShape, lw, lh), new THREE.MeshPhysicalMaterial({map: licTex, roughness: .55, clearcoat: .7, clearcoatRoughness: .05, envMapIntensity: .25, toneMapped: false}));
   licMesh.position.z = ld + lb + .0004; plate.add(licMesh);
   card.add(plate);
+  // The role: chrome letters that mirror the studio, with a glint travelling across them.
+  const rw = ROLE_W / PW * W, rh = ROLE_H / PH * H;
+  const roleTex = tex(roleCanvas), roleBump = new THREE.CanvasTexture(roleHeight);
+  const rolePlate = new THREE.Group(); rolePlate.visible = false;
+  const roleGeo = new THREE.PlaneGeometry(rw, rh);
+  rolePlate.add(new THREE.Mesh(roleGeo, new THREE.MeshPhysicalMaterial({
+    map: roleTex, transparent: true, alphaTest: .05, normalMap: roleBump, normalScale: new THREE.Vector2(2, 2), metalness: 1, roughness: .14,
+    iridescence: .35, iridescenceIOR: 1.6, clearcoat: 1, clearcoatRoughness: .03,
+    emissive: 0xffffff, emissiveMap: roleTex, emissiveIntensity: .3, envMapIntensity: 2,
+  })));
+  const glintMat = mask => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: {uTime: {value: 0}, uMask: {value: mask}},
+    vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uTime; uniform sampler2D uMask; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){
+        float m = texture2D(uMask, vUv).a;
+        vec2 tilt = vV.xy - vN.xy;
+        float p = fract(uTime / 3.6);
+        float x = vUv.x + (vUv.y - .5) * .3 - (p * 2.6 - .8) + tilt.x * .9;
+        float a = (exp(-x * x * 260.0) * 1.1 + exp(-x * x * 18.0) * .25) * m;
+        gl_FragColor = vec4(vec3(1.0, .98, .95) * a, a);
+      }`,
+  });
+  const roleShine = new THREE.Mesh(roleGeo, glintMat(roleTex)); roleShine.position.z = .0003; rolePlate.add(roleShine);
+  card.add(rolePlate);
+  // Supporter sticker: holographic foil whose rainbow shifts with the viewing angle.
+  const sr = STICK / PW * W;
+  const stickerTex = tex(stickerCanvas), stickerBump = new THREE.CanvasTexture(stickerHeight);
+  const sticker = new THREE.Group(); sticker.visible = false;
+  const stickGeo = new THREE.PlaneGeometry(sr, sr);
+  sticker.add(new THREE.Mesh(stickGeo, new THREE.MeshPhysicalMaterial({
+    map: stickerTex, normalMap: stickerBump, normalScale: new THREE.Vector2(2.2, 2.2), transparent: true, alphaTest: .05, metalness: .55, roughness: .22, iridescence: 1, iridescenceIOR: 1.9,
+    iridescenceThicknessRange: [120, 900], clearcoat: 1, clearcoatRoughness: .04, emissive: 0xffffff, emissiveMap: stickerTex, emissiveIntensity: .35,
+  })));
+  const stickerHolo = new THREE.Mesh(stickGeo, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: {uTime: {value: 0}, uMask: {value: stickerTex}},
+    vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uTime; uniform sampler2D uMask; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      vec3 rainbow(float t){ return .5 + .5 * cos(6.28318 * (t + vec3(0.0, .33, .67))); }
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      void main(){
+        float m = texture2D(uMask, vUv).a;
+        vec2 tilt = vV.xy - vN.xy, d = vUv - .5;
+        float t = atan(d.y, d.x) / 6.28318 + length(d) * 1.4 + tilt.x * 2.2 - tilt.y * 1.6 + uTime * .05;
+        vec2 cell = floor(vUv * 90.0);
+        float sp = step(.97, hash(cell)) * pow(max(0.0, sin(hash(cell + 3.1) * 40.0 + tilt.x * 30.0 + tilt.y * 22.0)), 8.0);
+        float a = (.32 + sp) * m;
+        gl_FragColor = vec4(mix(rainbow(t), vec3(1.0), sp) * a, a);
+      }`,
+  }));
+  stickerHolo.position.z = .0003; sticker.add(stickerHolo);
+  sticker.position.set(STICKER.x / PW * W - W / 2, H / 2 - STICKER.y / PH * H, faceZ + .0012);
+  card.add(sticker);
   // Soft shadow on an invisible floor behind the card: it shifts and blurs as the card turns.
   const sh = document.createElement('canvas'); sh.width = sh.height = 256;
   const shx = sh.getContext('2d'), sg = shx.createRadialGradient(128, 128, 0, 128, 128, 128);
@@ -572,7 +761,7 @@ function createView() {
   const clock = new THREE.Clock();
   function frame() {
     const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime;
-    holo.uniforms.uTime.value = t;
+    holo.uniforms.uTime.value = t; roleShine.material.uniforms.uTime.value = t; stickerHolo.material.uniforms.uTime.value = t;
     if (state.spin) {
       // Recording: a fixed full turn.
       const p = Math.max(0, Math.min((performance.now() - state.spin.start) / state.spin.duration, 1));
@@ -604,6 +793,13 @@ function createView() {
     resize,
     update(v) {
       frontTex.needsUpdate = true; backTex.needsUpdate = true; licTex.needsUpdate = true; frontBump.needsUpdate = true; backBump.needsUpdate = true;
+      rolePlate.visible = Boolean(v.role && roleSlot);
+      if (rolePlate.visible) {
+        roleTex.needsUpdate = true; roleBump.needsUpdate = true;
+        rolePlate.position.set((54 + ROLE_W / 2) / PW * W - W / 2, H / 2 - (roleSlot.y + 18 + ROLE_H / 2) / PH * H, faceZ + .001);
+      }
+      sticker.visible = Boolean(v.donor);
+      if (sticker.visible) { stickerTex.needsUpdate = true; stickerBump.needsUpdate = true; }
       // Foil: subtle on the ladder, stronger on prestige levels; light designs need less to stay readable.
       const finish = FINISHES[form.elements.finish?.value] || FINISHES.none;
       holo.uniforms.uMode.value = finish.mode;
@@ -632,6 +828,7 @@ function createFlatView() {
 // Export ------------------------------------------------------------------------------
 function ready() {
   const v = values();
+  if (crewLoaded && !picked) { inlineMessage(message, 'error', v.username ? 'Pick your username from the list.' : 'Add your username first.'); form.elements.username.focus(); return null; }
   if (!v.username) { inlineMessage(message, 'error', 'Add your username first.'); form.elements.username.focus(); return null; }
   if (!v.team) { inlineMessage(message, 'error', 'Choose your team.'); form.elements.team.focus(); return null; }
   if (!v.level) { inlineMessage(message, 'error', 'Choose your crew licence level.'); form.elements.level.focus(); return null; }
@@ -794,7 +991,8 @@ FORMATS.story.hint = '9:16'; FORMATS.post.hint = '4:5'; FORMATS.square.hint = '1
 // Embed: an iframe with only the 3D pass, for personal sites, Carrd, Notion…
 const FINISH_KEYS = Object.keys(FINISHES);
 function embedUrl(v) {
-  const q = new URLSearchParams({u: v.username, team: form.elements.team.value, level: String(v.level.index + 1), finish: form.elements.finish.value});
+  const q = new URLSearchParams(picked ? {id: picked.id, ...(shownName ? {name: shownName} : {}), finish: form.elements.finish.value}
+    : {u: v.username, team: form.elements.team.value, level: String(v.level.index + 1), finish: form.elements.finish.value});
   return `${location.origin}/crew-license/embed?${q}`;
 }
 $('lic-embed')?.addEventListener('click', () => {
@@ -808,15 +1006,118 @@ $('lic-embed-copy')?.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); toast('success', 'Embed code copied', 'Paste it into your site, Carrd or Notion (embed block).'); }
   catch { field.select(); toast('info', 'Copy the code', 'Select the code and copy it.'); }
 });
+// Nickname search in the crew list ----------------------------------------------------
+const userInput = form.elements.username, suggest = $('lic-suggest'), pickedBox = $('lic-picked');
+let results = [], active = -1, searchId = 0, searchTimer = 0;
+const entryNote = e => e.note ? ` (${e.note})` : '';
+function pick(e) {
+  picked = e;
+  userInput.value = e.username;
+  form.elements.team.value = e.team;
+  form.elements.level.value = String(e.level - 1);
+  const team = TEAMS[e.team], level = LEVELS[e.level - 1];
+  pickedBox.replaceChildren();
+  const add = (cls, text, color) => { const el = document.createElement('span'); el.className = cls; el.textContent = text; if (color) el.style.setProperty('--team', color); pickedBox.append(el); };
+  add('lic-chip team', teamLabel(team, ' · '), team.color);
+  add('lic-chip', level.name);
+  if (e.role) add('lic-chip role', e.role);
+  if (e.donor) add('lic-chip donor', '♥ Campaign supporter');
+  pickedBox.hidden = false;
+  closeSuggest();
+  nameChoice(e.x || []);
+}
+// Name on the certificate: the E1 username, or one of the X handles in the crew list.
+const nameBox = $('lic-name');
+function nameChoice(handles, chosen = '') {
+  const own = picked.username.replace(/^@/, '').toLowerCase();
+  const options = handles.filter(h => h.toLowerCase() !== own);
+  shownName = options.includes(chosen) ? chosen : '';
+  nameBox.querySelectorAll('label').forEach(l => l.remove());
+  for (const [value, text] of [['', picked.username.replace(/^@/, '')], ...options.map(h => [h, `@${h}`])]) {
+    const label = document.createElement('label'), input = document.createElement('input'), span = document.createElement('span');
+    input.type = 'radio'; input.name = 'shown'; input.value = value; input.checked = value === shownName;
+    span.textContent = text; label.append(input, span); nameBox.append(label);
+  }
+  nameBox.hidden = !options.length;
+}
+nameBox.addEventListener('input', e => { if (e.target.name === 'shown') shownName = e.target.value; });  // before the form's input listener repaints
+async function pickFromList(e) {
+  pick(e); paint();
+  // The X handles and the supporter badge come with the single entry.
+  try { const r = await fetch(`/api/crew?id=${encodeURIComponent(e.id)}`); if (r.ok && picked?.id === e.id) { pick(await r.json()); paint(); } } catch { /* username only */ }
+}
+function closeSuggest() { suggest.hidden = true; active = -1; userInput.setAttribute('aria-expanded', 'false'); userInput.removeAttribute('aria-activedescendant'); }
+function showSuggest(list, query) {
+  results = list; active = -1; suggest.replaceChildren();
+  if (!list.length) {
+    const li = document.createElement('li'); li.className = 'empty';
+    li.textContent = query ? 'No crew member with this name. Check the spelling of your E1 username.' : '';
+    suggest.append(li);
+  }
+  list.forEach((e, i) => {
+    const li = document.createElement('li'); li.id = `lic-opt-${i}`; li.setAttribute('role', 'option'); li.dataset.index = i;
+    const name = document.createElement('b'); name.textContent = e.username;
+    const meta = document.createElement('small'); meta.textContent = entryNote(e).trim();
+    li.style.setProperty('--team', TEAMS[e.team].color); li.append(name, meta);
+    suggest.append(li);
+  });
+  suggest.hidden = false; userInput.setAttribute('aria-expanded', 'true');
+}
+function highlight(i) {
+  active = (i + results.length) % results.length;
+  suggest.querySelectorAll('li[role=option]').forEach((li, k) => li.setAttribute('aria-selected', String(k === active)));
+  userInput.setAttribute('aria-activedescendant', `lic-opt-${active}`);
+  suggest.children[active]?.scrollIntoView({block: 'nearest'});
+}
+async function search() {
+  const query = userInput.value.trim().replace(/^@/, ''), id = ++searchId;
+  if (!query) { closeSuggest(); return; }
+  try {
+    const r = await fetch(`/api/crew?q=${encodeURIComponent(query)}`);
+    const data = await r.json();
+    if (id === searchId && document.activeElement === userInput) showSuggest(data.results || [], query);
+  } catch { /* offline: keep typing */ }
+}
+userInput.addEventListener('input', e => {
+  if (!crewLoaded) return;
+  if (picked) { picked = null; shownName = ''; pickedBox.hidden = true; nameBox.hidden = true; form.elements.team.value = ''; form.elements.level.value = ''; }
+  clearTimeout(searchTimer); searchTimer = setTimeout(search, 140);
+});
+userInput.addEventListener('focus', () => { if (crewLoaded && !picked && userInput.value.trim()) search(); });
+userInput.addEventListener('keydown', e => {
+  if (suggest.hidden || !results.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); highlight(active + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(active - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); const r = results[active >= 0 ? active : 0]; if (r && (active >= 0 || results.length === 1)) pickFromList(r); }
+  else if (e.key === 'Escape') closeSuggest();
+});
+suggest.addEventListener('pointerdown', e => {
+  const li = e.target.closest('li[role=option]'); if (!li) return;
+  e.preventDefault(); pickFromList(results[Number(li.dataset.index)]);
+});
+userInput.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+try {
+  const r = await fetch('/api/crew');
+  crewLoaded = r.ok && (await r.json()).loaded === true;
+} catch { crewLoaded = false; }
+// Without the list (not uploaded yet), the team and licence are chosen by hand as before.
+$('lic-manual').hidden = crewLoaded;
+if (!crewLoaded) { $('lic-user-hint').textContent = 'Your username on e1.ensite.org.'; userInput.placeholder = 'e.g. awannv'; userInput.removeAttribute('role'); }
+
 const embedMode = location.pathname.endsWith('/embed');
 if (embedMode) {
   // Fill the form from the link and show only the card.
   document.body.classList.add('embed');
   const q = new URLSearchParams(location.search);
-  form.elements.username.value = (q.get('u') || '').slice(0, 24);
-  if (TEAMS[q.get('team')]) form.elements.team.value = q.get('team');
-  const lv = Number(q.get('level')); if (lv >= 1 && lv <= LEVELS.length) form.elements.level.value = String(lv - 1);
   if (FINISH_KEYS.includes(q.get('finish'))) form.elements.finish.value = q.get('finish');
+  if (q.get('id')) {
+    // From the crew list: name, team, licence and role are the ones on the list.
+    try { const r = await fetch(`/api/crew?id=${encodeURIComponent(q.get('id'))}`); if (r.ok) { pick(await r.json()); nameChoice(picked.x || [], q.get('name') || ''); } } catch { /* empty card */ }
+  } else {
+    form.elements.username.value = (q.get('u') || '').slice(0, 24);
+    if (TEAMS[q.get('team')]) form.elements.team.value = q.get('team');
+    const lv = Number(q.get('level')); if (lv >= 1 && lv <= LEVELS.length) form.elements.level.value = String(lv - 1);
+  }
 }
 
 // Phone motion (iOS asks for permission after a tap) ---------------------------------
