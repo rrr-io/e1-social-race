@@ -36,7 +36,6 @@
         <ul id="lic-suggest" class="lic-suggest" role="listbox" aria-label="Crew members" hidden></ul>
         <small class="field-hint" id="lic-user-hint">Your username on e1.ensite.org. Pick it from the list: team, licence and role are filled in for you.</small>
       </div>
-      <div class="lic-picked" id="lic-picked" hidden></div>
       <fieldset class="lic-name" id="lic-name" hidden><legend>Name on the certificate</legend></fieldset>
       <div class="lic-manual" id="lic-manual" hidden>
       <label>Team
@@ -68,10 +67,17 @@
         </select>
         <small class="field-hint">Effect on the 3D card and the video.</small>
       </label>
+      <label>Card colour
+        <select name="color">
+          <option value="team">Team colour</option>
+          <option value="classic">Classic silver</option>
+        </select>
+      </label>
       <p id="lic-message" class="form-message" role="status" aria-live="polite"></p>
       <div class="lic-actions">
         <button type="button" id="lic-download">Download certificate</button>
         <button type="button" id="lic-licence" class="btn-ghost">Download crew licence</button>
+        <button type="button" id="lic-donor" class="lic-donor-btn" hidden>Download donor certificate</button>
         <button type="button" id="lic-video" class="btn-ghost">Download video</button>
         <button type="button" id="lic-flip" class="btn-ghost">Flip</button>
       </div>

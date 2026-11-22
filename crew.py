@@ -33,7 +33,7 @@ LEVELS = ['Paddock Rookie', 'Race Ready', 'Fast Lane', 'Pit Lane Pro', 'Redline 
 LEVEL_INDEX = {n.casefold(): i for i, n in enumerate(LEVELS)}
 COLUMNS = {'username': ('username', 'e1 username', 'nickname'), 'team': ('team', 'scuderia'),
            'level': ('level', 'crew licence level', 'crew license level'), 'role': ('role',), 'x': ('x', 'social link'), 'donor': ('donor', 'supporter', 'donated')}
-NO = {'', 'no', 'n', 'false', '0', '-', 'none'}
+NO = {'', 'no', 'n', 'false', 'falso', '0', '-', 'none'}
 X_HANDLE = re.compile(r'(?:x|twitter)\.com/@?([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])')
 NOT_HANDLES = {'i', 'home', 'intent', 'share', 'search', 'hashtag', 'explore', 'enmamagrandprix'}  # the project account is not a crew handle
 
@@ -62,9 +62,16 @@ def fold(text):
     return unicodedata.normalize('NFKC', text).strip().lstrip('@').casefold()
 
 
+def delimiter(text):
+    # Spreadsheets in some languages (Italian Excel, Numbers) save with ; or tabs instead of commas.
+    first = text.split('\n', 1)[0]
+    return max((',', ';', '\t'), key=first.count)
+
+
 def parse(text):
     """CSV text -> (entries, skipped rows). Same name and team twice: one entry, the higher level, the role kept."""
-    reader = csv.DictReader(io.StringIO(text.lstrip('﻿')))
+    text = text.lstrip('\ufeff')
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter(text))
     header = {(h or '').strip().casefold(): h for h in reader.fieldnames or []}
     cols = {k: next((header[n] for n in names if n in header), None) for k, names in COLUMNS.items()}
     if not (cols['username'] and cols['team'] and cols['level']):
@@ -150,4 +157,5 @@ def replace(data):
     tmp = p.with_suffix('.tmp')
     tmp.write_text(text, encoding='utf-8')
     os.replace(tmp, p)
-    return {'count': len(rows), 'roles': sum(1 for e in rows if e['role']), 'donors': sum(1 for e in rows if e['donor']), 'skipped_lines': skipped[:50], 'skipped': len(skipped)}
+    columns = next(csv.reader(io.StringIO(text.lstrip('\ufeff')), delimiter=delimiter(text.lstrip('\ufeff'))))
+    return {'columns': columns, 'count': len(rows), 'roles': sum(1 for e in rows if e['role']), 'donors': sum(1 for e in rows if e['donor']), 'skipped_lines': skipped[:50], 'skipped': len(skipped)}

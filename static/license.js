@@ -19,6 +19,7 @@ const TEAMS = {
   rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#13804f'},   // bottle green
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
 };
+const CLASSIC = '#a9adb7';   // neutral silver, for who prefers it to the team colour
 const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
 // Coordinator roles from the E1 glossary: what each one did, shown under the role on the certificate.
 const ROLES = {
@@ -49,7 +50,9 @@ for (const [label, tier] of [['Progression ladder', 'ladder'], ['Prestige distin
 let crewLoaded = false, picked = null, shownName = '';   // shownName: an X handle chosen instead of the username
 function values() {
   const username = shownName ? `@${shownName}` : (picked ? picked.username : form.elements.username.value).trim().replace(/^@/, '');
-  const team = TEAMS[form.elements.team.value] || null;
+  const base = TEAMS[form.elements.team.value] || null;
+  // "Classic" colour: the same team, in neutral silver instead of the team colour.
+  const team = base && form.elements.color?.value === 'classic' ? {...base, color: CLASSIC} : base;
   const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
   const role = picked?.role || '', donor = Boolean(picked?.donor);
   return {username, key: picked?.username || username, team, level, role, donor, complete: Boolean(username && team && level && (!crewLoaded || picked))};
@@ -422,6 +425,83 @@ function drawSticker(ctx, x, y, r, mode) {
   stickerMarks(ctx, r, 'rgba(150,140,185,.55)');
   ctx.restore();
 }
+// Donor certificate: a separate card, licence-sized (1600 x 900), for crew members who donated to the campaign.
+const DONOR_THANKS = 'Thank you for fuelling our race. Your support kept the crew running, vote after vote, and helped carry ENHYPEN all the way to the Daesang.';
+// Team logos (round badges), shown on the donor certificate.
+const teamLogos = Object.fromEntries(['jaybull', 'mcjakey', 'hoonrari', 'alpinoo', 'meowcedes', 'rikston'].map(k => {
+  const img = new Image(); img.onload = () => { if (picked?.donor) paint(); }; img.src = `/teams/${k}.png`; return [k, img];
+}));
+const teamKey = team => Object.keys(TEAMS).find(k => TEAMS[k].name === team?.name);
+function shade(hex, f) {   // darker team colour for text on paper (yellow and pink are unreadable as they are)
+  const n = parseInt(hex.slice(1), 16), m = c => Math.round(c * f);
+  return `rgb(${m(n >> 16)},${m((n >> 8) & 255)},${m(n & 255)})`;
+}
+function filigree(ctx, W, H, color) {
+  // Security-paper guilloche: fine waves across the sheet and a rosette behind the name.
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = .7;
+  for (let k = 0; k < 26; k++) {
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 6) { const y = 40 + k * (H - 80) / 25 + Math.sin(x / 70 + k * .6) * 9 + Math.sin(x / 23 + k) * 2.5; x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+  }
+  ctx.translate(W / 2, H / 2 + 10);
+  for (let k = 0; k < 36; k++) {
+    ctx.beginPath();
+    for (let i = 0; i <= 720; i++) { const a = i / 720 * Math.PI * 2, r = 250 + Math.sin(a * 12 + k * Math.PI / 18) * 34 + Math.sin(a * 5 - k * .3) * 10; ctx.lineTo(Math.cos(a) * r * 1.5, Math.sin(a) * r); }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function inkLogo(ctx, img, x, y, h, color) {
+  // The white E1 logo, recoloured for paper.
+  if (!img.complete || !img.naturalWidth) return;
+  const w = h * img.naturalWidth / img.naturalHeight, c = document.createElement('canvas'); c.width = w * 3; c.height = h * 3;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, c.width, c.height); g.globalCompositeOperation = 'source-in'; g.fillStyle = color; g.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(c, x - w / 2, y, w, h);
+}
+function drawDonorCard(ctx, v) {
+  const c = v.team?.color || '#6b6e78', ink = shade(c, v.team && ['#ffd23f', '#ff7eb6', '#2ee6c5'].includes(c) ? .62 : .82), W = CW, H = CH, mid = W / 2;
+  ctx.save();
+  roundRect(ctx, 0, 0, W, H, RADIUS); ctx.clip();
+  // Paper: warm white to light grey, with a filigree.
+  const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#fbfaf7'); g.addColorStop(1, '#e9e9ec');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  filigree(ctx, W, H, 'rgba(40,44,56,.055)');
+  ctx.save(); ctx.globalAlpha = .035; ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = grainPattern(ctx); ctx.fillRect(0, 0, W, H); ctx.restore();
+  // Frame: team colour, then a hairline.
+  roundRect(ctx, 30, 30, W - 60, H - 60, RADIUS - 22); ctx.lineWidth = 3; ctx.strokeStyle = c; ctx.stroke();
+  roundRect(ctx, 42, 42, W - 84, H - 84, RADIUS - 32); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(30,32,40,.25)'; ctx.stroke();
+  // Text, centred.
+  const centre = (text, y, sp) => { const w = spacedWidth(ctx, text, sp); spaced(ctx, text, mid - w / 2, y, sp); };
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  inkLogo(ctx, logo, mid, 82, 48, '#16181d');
+  ctx.fillStyle = '#6b6e78'; ctx.font = font(20, 700); centre('ENHYPEN MAMA GRAND PRIX 2026', 180, 6);
+  ctx.fillStyle = '#16181d'; ctx.font = font(72, 700); centre('DONOR CERTIFICATE', 262, 7);
+  ctx.fillStyle = c; ctx.fillRect(mid - 40, 290, 80, 4);
+  ctx.fillStyle = '#6b6e78'; ctx.font = font(19, 700); centre('PRESENTED TO', 356, 5);
+  const name = v.username || 'your username';
+  fit(ctx, name, 1000, 66, 700); ctx.fillStyle = '#16181d'; ctx.textAlign = 'center'; ctx.fillText(name, mid, 436);
+  ctx.fillStyle = ink; ctx.font = font(28, 700); ctx.fillText(v.team ? teamLabel(v.team, ' · ') : 'your team', mid, 482);
+  ctx.fillStyle = '#4a4d56'; ctx.font = font(26, 400);
+  const lines = []; let line = '';
+  for (const word of DONOR_THANKS.split(' ')) { const test = line ? `${line} ${word}` : word; if (ctx.measureText(test).width > 980 && line) { lines.push(line); line = word; } else line = test; }
+  lines.push(line); lines.forEach((l, i) => ctx.fillText(l, mid, 556 + i * 40));
+  ctx.fillStyle = '#7d808a'; ctx.font = font(16, 700); ctx.textAlign = 'left';
+  centre(`NO. ${licenceNumber(v)}-S · ISSUED ${issued} · KST`, H - 92, 3);
+  ctx.restore();
+  // Team badge (bottom left) and the supporter seal (bottom right), small, like stamps.
+  const by = H - 150, bs = 64;
+  const img = teamLogos[teamKey(v.team)];
+  if (img?.complete && img.naturalWidth) {
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+    ctx.drawImage(img, 170 - bs, by - bs, bs * 2, bs * 2); ctx.restore();
+  } else if (v.team) {   // Independent Crew: the E1 mark in a team-colour disc
+    ctx.save(); ctx.beginPath(); ctx.arc(170, by, bs, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.restore();
+    if (logo.complete && logo.naturalWidth) { const h = 34, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, 170 - w / 2, by - h / 2, w, h); }
+  }
+  drawSticker(ctx, W - 170, by, bs, 'print');
+}
 function trophy(ctx, x, y, s, color) {
   ctx.save(); ctx.translate(x - s / 2, y - s / 2); ctx.scale(s / 48, s / 48); ctx.fillStyle = color;
   ctx.fill(new Path2D('M14 6h20v4h7v4c0 6-4 10-9.4 10.8A10 10 0 0 1 26 30.6V36h6v4H16v-4h6v-5.4a10 10 0 0 1-5.6-5.8C11 24 7 20 7 14v-4h7zm0 8h-3c0 3.4 1.6 5.8 4 6.6A13 13 0 0 1 14 18zm20 0v4c0 .9-.1 1.8-.3 2.6 2.4-.8 4-3.2 4-6.6z'));
@@ -470,6 +550,7 @@ function licenceNumber(v) {
 }
 
 const licence = document.createElement('canvas'); licence.width = CW * SCALE; licence.height = CH * SCALE;
+const donorCard = document.createElement('canvas'); donorCard.width = CW * SCALE; donorCard.height = CH * SCALE;
 const front = document.createElement('canvas'); front.width = PW * PSCALE; front.height = PH * PSCALE;
 const back = document.createElement('canvas'); back.width = PW * PSCALE; back.height = PH * PSCALE;
 const frontBase = document.createElement('canvas'); frontBase.width = front.width; frontBase.height = front.height;
@@ -516,6 +597,8 @@ async function paint() {
   if (id !== paintId) return;   // a newer change is already being drawn
   const lctx = licence.getContext('2d');
   lctx.setTransform(SCALE, 0, 0, SCALE, 0, 0); lctx.clearRect(0, 0, CW, CH); drawLicence(lctx, v, art);
+  $('lic-donor').hidden = !v.donor;
+  if (v.donor) { const dctx = donorCard.getContext('2d'); dctx.setTransform(SCALE, 0, 0, SCALE, 0, 0); dctx.clearRect(0, 0, CW, CH); drawDonorCard(dctx, v); }
   for (const [canvas, draw, arg] of [[front, drawPassFront, true], [frontBase, drawPassFront, false], [back, drawPassBack]]) {
     const ctx = canvas.getContext('2d');
     ctx.setTransform(PSCALE, 0, 0, PSCALE, 0, 0); ctx.clearRect(0, 0, PW, PH);
@@ -857,6 +940,14 @@ $('lic-licence').addEventListener('click', () => {
     toast('success', 'Crew licence saved', 'Find it in your downloads or Photos.');
   }, 'image/png');
 });
+$('lic-donor').addEventListener('click', () => {
+  const v = ready(); if (!v || !v.donor) return;
+  donorCard.toBlob(blob => {
+    if (!blob) { toast('error', 'Could not create the image', 'Try again, or use another browser.'); return; }
+    download(blob, `emgp26-donor-certificate-${slug(v)}.png`);
+    toast('success', 'Donor certificate saved', 'Thank you for supporting the campaign!');
+  }, 'image/png');
+});
 $('lic-flip').addEventListener('click', () => view?.flip());
 
 // Video: a second renderer at 1080 x 1350 records one full turn of the card.
@@ -991,8 +1082,9 @@ FORMATS.story.hint = '9:16'; FORMATS.post.hint = '4:5'; FORMATS.square.hint = '1
 // Embed: an iframe with only the 3D pass, for personal sites, Carrd, Notion…
 const FINISH_KEYS = Object.keys(FINISHES);
 function embedUrl(v) {
-  const q = new URLSearchParams(picked ? {id: picked.id, ...(shownName ? {name: shownName} : {}), finish: form.elements.finish.value}
-    : {u: v.username, team: form.elements.team.value, level: String(v.level.index + 1), finish: form.elements.finish.value});
+  const look = {finish: form.elements.finish.value, ...(form.elements.color.value === 'classic' ? {color: 'classic'} : {})};
+  const q = new URLSearchParams(picked ? {id: picked.id, ...(shownName ? {name: shownName} : {}), ...look}
+    : {u: v.username, team: form.elements.team.value, level: String(v.level.index + 1), ...look});
   return `${location.origin}/crew-license/embed?${q}`;
 }
 $('lic-embed')?.addEventListener('click', () => {
@@ -1007,7 +1099,7 @@ $('lic-embed-copy')?.addEventListener('click', async () => {
   catch { field.select(); toast('info', 'Copy the code', 'Select the code and copy it.'); }
 });
 // Nickname search in the crew list ----------------------------------------------------
-const userInput = form.elements.username, suggest = $('lic-suggest'), pickedBox = $('lic-picked');
+const userInput = form.elements.username, suggest = $('lic-suggest');
 let results = [], active = -1, searchId = 0, searchTimer = 0;
 const entryNote = e => e.note ? ` (${e.note})` : '';
 function pick(e) {
@@ -1015,17 +1107,13 @@ function pick(e) {
   userInput.value = e.username;
   form.elements.team.value = e.team;
   form.elements.level.value = String(e.level - 1);
-  const team = TEAMS[e.team], level = LEVELS[e.level - 1];
-  pickedBox.replaceChildren();
-  const add = (cls, text, color) => { const el = document.createElement('span'); el.className = cls; el.textContent = text; if (color) el.style.setProperty('--team', color); pickedBox.append(el); };
-  add('lic-chip team', teamLabel(team, ' · '), team.color);
-  add('lic-chip', level.name);
-  if (e.role) add('lic-chip role', e.role);
-  if (e.donor) add('lic-chip donor', '♥ Campaign supporter');
-  pickedBox.hidden = false;
   closeSuggest();
   nameChoice(e.x || []);
+  // Donors start with the holographic finish (unless a finish was chosen).
+  if (e.donor && !finishChosen) form.elements.finish.value = 'holo';
 }
+let finishChosen = false;
+form.elements.finish.addEventListener('change', () => { finishChosen = true; });
 // Name on the certificate: the E1 username, or one of the X handles in the crew list.
 const nameBox = $('lic-name');
 function nameChoice(handles, chosen = '') {
@@ -1080,7 +1168,7 @@ async function search() {
 }
 userInput.addEventListener('input', e => {
   if (!crewLoaded) return;
-  if (picked) { picked = null; shownName = ''; pickedBox.hidden = true; nameBox.hidden = true; form.elements.team.value = ''; form.elements.level.value = ''; }
+  if (picked) { picked = null; shownName = ''; nameBox.hidden = true; form.elements.team.value = ''; form.elements.level.value = ''; }
   clearTimeout(searchTimer); searchTimer = setTimeout(search, 140);
 });
 userInput.addEventListener('focus', () => { if (crewLoaded && !picked && userInput.value.trim()) search(); });
@@ -1109,7 +1197,8 @@ if (embedMode) {
   // Fill the form from the link and show only the card.
   document.body.classList.add('embed');
   const q = new URLSearchParams(location.search);
-  if (FINISH_KEYS.includes(q.get('finish'))) form.elements.finish.value = q.get('finish');
+  if (FINISH_KEYS.includes(q.get('finish'))) { form.elements.finish.value = q.get('finish'); finishChosen = true; }
+  if (q.get('color') === 'classic') form.elements.color.value = 'classic';
   if (q.get('id')) {
     // From the crew list: name, team, licence and role are the ones on the list.
     try { const r = await fetch(`/api/crew?id=${encodeURIComponent(q.get('id'))}`); if (r.ok) { pick(await r.json()); nameChoice(picked.x || [], q.get('name') || ''); } } catch { /* empty card */ }

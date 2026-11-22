@@ -97,6 +97,9 @@ class Crew(unittest.TestCase):
         self.assertEqual(self.call(f'/api/crew?id={found["id"]}', auth=False)[1]['x'], ['Jaybird_X'])
         self.assertEqual(self.call('/api/crew', 'username,team,level\nx,Nowhere,All-Star\n')[0], 400)
         self.assertEqual(self.call('/api/crew?q=nini', auth=False)[1]['results'][0]['team'], 'rikston')  # old list kept
+        # Italian spreadsheets: semicolons.
+        status, result = self.call('/api/crew', 'username;team;level;role;x;donor\nzed;McJakey;All-Star;;;sì\n')
+        self.assertEqual((status, result['count'], result['donors'], result['columns'][-1]), (200, 1, 1, 'donor'))
 
     def test_certificate_pages(self):
         for path in ('/crew-license', '/crew-license/embed', '/license.js', '/license.css'):

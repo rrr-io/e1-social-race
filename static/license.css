@@ -89,10 +89,6 @@ body.embed .lic-get:hover{color:#fff}
 .lic-suggest li[aria-selected=true],.lic-suggest li[role=option]:hover{background:#22252d}
 .lic-suggest li.empty{cursor:default;color:#8d8f99;font-size:14px;line-height:1.45}
 .lic-suggest li.empty::before{display:none}
-.lic-picked{display:flex;flex-wrap:wrap;gap:6px;margin:-8px 0 18px}
-.lic-chip{font-size:13px;font-weight:700;padding:5px 10px;border-radius:999px;border:1px solid #333744;color:#d4d5db}
-.lic-chip.team{border-color:var(--team);color:#fff;background:color-mix(in srgb,var(--team) 22%,transparent)}
-.lic-chip.role{color:#16181d;border-color:#fff;background:linear-gradient(110deg,#8d929c,#f4f6fa 30%,#a9aeb7 48%,#fff 60%,#b9bec7 80%,#e9ecf1);text-transform:uppercase;letter-spacing:.8px}
 .lic-name{border:0;padding:0;margin:0 0 18px;display:flex;flex-wrap:wrap;gap:6px}
 .lic-name legend{font-size:14px;font-weight:600;color:#a9abb4;margin-bottom:8px;padding:0}
 .lic-name label{position:relative;cursor:pointer}
@@ -100,4 +96,5 @@ body.embed .lic-get:hover{color:#fff}
 .lic-name span{display:block;font-size:14px;font-weight:700;padding:8px 14px;border-radius:999px;border:1px solid #3a3e4b;color:#d4d5db}
 .lic-name input:checked+span{border-color:var(--red);background:#e1060022;color:#fff}
 .lic-name input:focus-visible+span{box-shadow:0 0 0 3px #e1060055}
-.lic-chip.donor{color:#2a2540;border-color:#fff;background:conic-gradient(from 40deg,#ffd1f0,#c9e8ff,#d4ffe6,#fff2c4,#e2d4ff,#ffd1f0)}
+.lic-actions .lic-donor-btn{grid-column:1/-1;color:#2a2540;border-color:#fff;background:conic-gradient(from 40deg at 50% 50%,#ffd1f0,#c9e8ff,#d4ffe6,#fff2c4,#e2d4ff,#ffd1f0)}
+.lic-actions .lic-donor-btn[hidden]{display:none}
