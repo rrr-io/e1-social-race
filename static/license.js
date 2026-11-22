@@ -925,7 +925,7 @@ function createView() {
   const plateSide = new THREE.ExtrudeGeometry(roundedShape(lw - 2 * lb, lh - 2 * lb, lr - lb), {depth: ld, bevelEnabled: true, bevelThickness: lb, bevelSize: lb, bevelSegments: 3, curveSegments: 12});
   plate.add(new THREE.Mesh(plateSide, new THREE.MeshPhysicalMaterial({color: 0x1a1b20, roughness: .3, clearcoat: 1, clearcoatRoughness: .08})));
   const licBump = new THREE.CanvasTexture(licHeight);
-  const licMesh = new THREE.Mesh(faceGeometry(licShape, lw, lh), new THREE.MeshPhysicalMaterial({map: licTex, roughness: .55, clearcoat: .7, clearcoatRoughness: .05, envMapIntensity: .25, toneMapped: false}));
+  const licMesh = new THREE.Mesh(faceGeometry(licShape, lw, lh), new THREE.MeshPhysicalMaterial({map: licTex, roughness: .55, clearcoat: .7, clearcoatRoughness: .22, envMapIntensity: .25, toneMapped: false}));
   licMesh.position.z = ld + lb + .0004; plate.add(licMesh);
   card.add(plate);
   // The role: chrome letters that mirror the studio, with a glint travelling across them.
@@ -1107,7 +1107,8 @@ function createView() {
     const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime;
     holo.uniforms.uTime.value = t; roleShine.material.uniforms.uTime.value = t; stickerHolo.material.uniforms.uTime.value = t;
     if (state.spin) {
-      // Recording: a fixed full turn.
+      // Recording: a fixed full turn, lit from a fixed point (not wherever the finger or mouse last was).
+      glint.position.set(1.6, 1.4, 3);
       const p = Math.max(0, Math.min((performance.now() - state.spin.start) / state.spin.duration, 1));
       const e = p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
       card.rotation.set(.12 + Math.sin(p * Math.PI * 2) * .06, -.35 + e * Math.PI * 2, 0);
