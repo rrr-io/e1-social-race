@@ -1323,7 +1323,7 @@ shareBox?.addEventListener('click', async e => {
   if (shared?.button === button) {
     const file = new File([shared.blob], `emgp26-certificate-${slug(v)}-${button.dataset.format}.${shared.ext}`, {type: shared.blob.type});
     if (navigator.canShare?.({files: [file]})) {
-      try { await navigator.share({files: [file], title: 'My EMGP26 certificate', text: 'I raced for ENHYPEN during ENHYPEN MAMA Grand Prix to bring home the Daesang. #EMGP2026 #ENHYPEN'}); }
+      try { await navigator.share({files: [file], title: 'My EMGP26 certificate', text: 'I raced for ENHYPEN during ENHYPEN MAMA Grand Prix to bring home the Daesang. #EMGP2026 #ENHYPEN #TYEMGP2026'}); }
       catch (err) { if (err?.name !== 'AbortError') { download(shared.blob, file.name); toast('info', 'Saved instead', 'Sharing was not possible, the video is in your downloads.'); } }
     } else {
       download(shared.blob, file.name);
