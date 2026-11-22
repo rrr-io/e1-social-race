@@ -25,6 +25,8 @@ TEAMS = {  # key: (scuderia, member team)
     'jaybull': ('Jaybull Racing', 'Team JAY'), 'mcjakey': ('McJakey', 'Team JAKE'), 'hoonrari': ('Hoonrari', 'Team SUNGHOON'),
     'alpinoo': ('Alpinoo', 'Team SUNOO'), 'meowcedes': ('Meowcedes', 'Team JUNGWON'), 'rikston': ('Rikston Drift', 'Team NI-KI'),
     'independent': ('Independent Crew', 'Independent Crew'),
+    # The organisers: no team and no crew licence level, a staff certificate instead.
+    'staff': ('EMGP Staff', 'Staff', 'Admin', 'Organising Team'),
 }
 TEAM_KEYS = {n.casefold(): k for k, names in TEAMS.items() for n in (k, *names)}
 LEVELS = ['Paddock Rookie', 'Race Ready', 'Fast Lane', 'Pit Lane Pro', 'Redline Ace', 'Paddock Icon', 'Circuit Storm', 'E1 Elite',
@@ -81,6 +83,8 @@ def parse(text):
         name = (row.get(cols['username']) or '').strip()[:40]
         team = TEAM_KEYS.get((row.get(cols['team']) or '').strip().casefold())
         level = LEVEL_INDEX.get((row.get(cols['level']) or '').strip().casefold())
+        if team == 'staff':
+            level = -1   # staff: no level (stored as 0)
         role = (row.get(cols['role']) or '').strip()[:60] if cols['role'] else ''
         handles = x_handles(row.get(cols['x']) or '') if cols['x'] else []
         donor = bool(cols['donor']) and (row.get(cols['donor']) or '').strip().casefold() not in NO
@@ -106,7 +110,7 @@ def parse(text):
         if len(same) > 1:
             teams = [e['team'] for e in same]
             for e in same:
-                e['note'] = TEAMS[e['team']][0] + (f' · {LEVELS[e["level"] - 1]}' if teams.count(e['team']) > 1 else '')
+                e['note'] = TEAMS[e['team']][0] + (f' · {LEVELS[e["level"] - 1]}' if teams.count(e['team']) > 1 and e['level'] else '')
     for e in entries:
         e['_fold'] = fold(e['username'])
     entries.sort(key=lambda e: (e['_fold'], e['team']))

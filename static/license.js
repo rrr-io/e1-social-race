@@ -18,12 +18,14 @@ const TEAMS = {
   meowcedes: {name: 'Meowcedes', member: 'Team Jungwon', color: '#2ee6c5'},
   rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#13804f'},   // bottle green
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
+  staff: {name: 'EMGP Staff', member: '', color: '#9a9ca6'},           // the organisers: default colour, no licence
 };
-const CLASSIC = '#a9adb7';   // neutral silver, for who prefers it to the team colour
+const CLASSIC = '#9a9ca6';   // the default (no team) colour, for who prefers it to the team colour
 const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
 // Coordinator roles from the E1 glossary: what each one did, shown under the role on the certificate.
 const ROLES = {
   'Team Manager': 'Team management', 'Team Captain': 'Leader', 'Co-Team Captain': 'Co-leader', 'Race Engineer': 'Race strategist',
+  'Circuit Operations': 'Admin team', 'Admin Media Crew': 'Admin team · Media', 'Race Control': 'Admin team · Race direction',
   'E1 System Steward': 'Race steward · Voting proof checker', 'Manual Steward': 'Race steward · Proof encoder & checker', 'Media Crew': 'Race steward · Media',
 };
 // The progression ladder and the prestige distinctions of e1.ensite.org.
@@ -54,8 +56,8 @@ function values() {
   // "Classic" colour: the same team, in neutral silver instead of the team colour.
   const team = base && form.elements.color?.value === 'classic' ? {...base, color: CLASSIC} : base;
   const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
-  const role = picked?.role || '', donor = Boolean(picked?.donor);
-  return {username, key: picked?.username || username, team, level, role, donor, complete: Boolean(username && team && level && (!crewLoaded || picked))};
+  const role = picked?.role || '', donor = Boolean(picked?.donor), staff = form.elements.team.value === 'staff';
+  return {username, key: picked?.username || username, team, level, role, donor, staff, complete: Boolean(username && team && (level || staff) && (!crewLoaded || picked))};
 }
 
 // 2D card drawing ------------------------------------------------------------------
@@ -139,7 +141,52 @@ function drawPlaceholder(ctx) {
   drawLogo(ctx, 1250, 726, 104, .5);
 }
 
+// Admin pass: what the organisers carry in the sleeve instead of a crew licence (same size).
+// Neutral on purpose (no team colours): graphite, an E1 in bas-relief and a barcode.
+const ADMIN_LOGO = {x: 1170, y: 250, h: 300};
+function logoMask(img, w, h, colour) {
+  const c = document.createElement('canvas'); c.width = Math.ceil(w); c.height = Math.ceil(h);
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'source-in'; g.fillStyle = colour; g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+function drawStaffPass(ctx, v) {
+  ctx.save(); roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
+  const g = ctx.createLinearGradient(0, 0, CW, CH); g.addColorStop(0, '#2a2d34'); g.addColorStop(1, '#0e0f12');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
+  let seed = 7; const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < 260; i++) { ctx.fillStyle = rnd() < .5 ? `rgba(255,255,255,${.015 + rnd() * .03})` : `rgba(0,0,0,${.05 + rnd() * .08})`; ctx.fillRect(0, rnd() * CH, CW, 1); }
+  // E1 in bas-relief: same material as the card, raised edges catching the light.
+  if (logo.complete && logo.naturalWidth) {
+    const {x, y, h} = ADMIN_LOGO, w = h * logo.naturalWidth / logo.naturalHeight, lx = x - w / 2;
+    ctx.drawImage(logoMask(logo, w, h, 'rgba(0,0,0,.6)'), lx + 5, y + 6);
+    ctx.drawImage(logoMask(logo, w, h, 'rgba(255,255,255,.16)'), lx - 3, y - 3);
+    const face = ctx.createLinearGradient(lx, y, lx + w, y + h); face.addColorStop(0, '#2c2f36'); face.addColorStop(1, '#1a1c21');
+    ctx.drawImage(logoMask(logo, w, h, face), lx, y);
+  }
+  // Header and holder, in the type of the crew licences.
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.fillStyle = RED; ctx.fillRect(88, 112, 40, 6);
+  ctx.fillStyle = '#d4d5db'; ctx.font = font(24, 700); spaced(ctx, 'ENHYPEN MAMA GRAND PRIX', 146, 122, 4);
+  ctx.fillStyle = '#fff'; ctx.font = font(60, 700); ctx.textAlign = 'right'; ctx.fillText('ADMIN PASS', CW - 88, 140); ctx.textAlign = 'left';
+  const name = v.username || 'Your Name';
+  ctx.fillStyle = '#fff'; fit(ctx, name, 760, 81, 700); ctx.fillText(name, 88, 350);
+  ctx.fillStyle = '#c0c4cd'; ctx.font = font(40, 600); ctx.fillText('EMGP Organizing Team', 89, 418);
+  ctx.fillStyle = '#eef0f4'; fit(ctx, (v.role || 'Admin').toUpperCase(), 820, 66, 700); ctx.fillText((v.role || 'Admin').toUpperCase(), 86, 540);
+  // Barcode and pass number.
+  let bx = 88; seed = [...(v.key || 'x')].reduce((a, ch) => a + ch.codePointAt(0), 99);
+  ctx.fillStyle = 'rgba(255,255,255,.7)';
+  while (bx < 360) { const w = 2 + Math.floor(rnd() * 3); ctx.fillRect(bx, 640, w, 46); bx += w + 2 + Math.floor(rnd() * 4); }
+  ctx.fillStyle = '#8d8f99'; ctx.font = font(22, 700); spaced(ctx, `${licenceNumber(v)} · ADMIN · 2026`, 88, 718, 4);
+  ctx.restore();
+}
+// The same E1, as a height map, for the raised logo of the 3D admin pass.
+function drawStaffRelief(ctx) {
+  ctx.fillStyle = '#7a7a7a'; ctx.fillRect(0, 0, CW, CH);
+  if (logo.complete && logo.naturalWidth) { const {x, y, h} = ADMIN_LOGO, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logoMask(logo, w, h, '#fff'), x - w / 2, y); }
+}
 function drawLicence(ctx, v, art) {
+  if (v.staff) return drawStaffPass(ctx, v);
   ctx.save();
   roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
   if (art) ctx.drawImage(art, 0, 0, CW, CH); else drawPlaceholder(ctx);
@@ -291,7 +338,11 @@ function drawPassFront(ctx, v, withLicence = true) {
   }
   // Statement.
   const name = v.username || 'your username';
-  let y = wrapText(ctx, [
+  let y = v.staff ? wrapText(ctx, [
+    {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
+    {text: ' ran the ENHYPEN MAMA Grand Prix 2026 as part of the ', color: '#c9cad0', weight: 400},
+    {text: 'Admin team', color: '#fff', weight: 700}, {text: ', from the first lap to the chequered flag.', color: '#c9cad0', weight: 400},
+  ], 56, sy + sh + 66, PW - 112, 44) : wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' raced with ', color: '#c9cad0', weight: 400}, {text: v.team ? teamLabel(v.team, ' · ') : 'your team', color: c, weight: 700},
     {text: ' in the ENHYPEN MAMA Grand Prix 2026, reaching the ', color: '#c9cad0', weight: 400},
@@ -551,6 +602,8 @@ function licenceNumber(v) {
 
 const licence = document.createElement('canvas'); licence.width = CW * SCALE; licence.height = CH * SCALE;
 const donorCard = document.createElement('canvas'); donorCard.width = CW * SCALE; donorCard.height = CH * SCALE;
+const staffRelief = document.createElement('canvas'); staffRelief.width = CW / 2; staffRelief.height = CH / 2;
+const licHeight = document.createElement('canvas'); licHeight.width = CW / 2; licHeight.height = CH / 2;
 const front = document.createElement('canvas'); front.width = PW * PSCALE; front.height = PH * PSCALE;
 const back = document.createElement('canvas'); back.width = PW * PSCALE; back.height = PH * PSCALE;
 const frontBase = document.createElement('canvas'); frontBase.width = front.width; frontBase.height = front.height;
@@ -598,6 +651,8 @@ async function paint() {
   const lctx = licence.getContext('2d');
   lctx.setTransform(SCALE, 0, 0, SCALE, 0, 0); lctx.clearRect(0, 0, CW, CH); drawLicence(lctx, v, art);
   $('lic-donor').hidden = !v.donor;
+  // Staff: no crew licence to download, and their card is always in the default colour.
+  $('lic-licence').hidden = v.staff; $('lic-color').hidden = v.staff;
   if (v.donor) { const dctx = donorCard.getContext('2d'); dctx.setTransform(SCALE, 0, 0, SCALE, 0, 0); dctx.clearRect(0, 0, CW, CH); drawDonorCard(dctx, v); }
   for (const [canvas, draw, arg] of [[front, drawPassFront, true], [frontBase, drawPassFront, false], [back, drawPassBack]]) {
     const ctx = canvas.getContext('2d');
@@ -618,7 +673,10 @@ async function paint() {
     drawSticker(hctx, STICK / 2, STICK / 2, STICKER.r, 'height');
     if (view?.renderer) heightFrom(stickerRelief, stickerHeight);
   }
-  if (view?.renderer) { heightFrom(frontBase, frontHeight); heightFrom(back, backHeight); if (v.role) heightFrom(roleCanvas, roleHeight); }
+  if (view?.renderer) {
+    heightFrom(frontBase, frontHeight); heightFrom(back, backHeight); if (v.role) heightFrom(roleCanvas, roleHeight);
+    if (v.staff) { const rc = staffRelief.getContext('2d'); rc.setTransform(.5, 0, 0, .5, 0, 0); drawStaffRelief(rc); heightFrom(staffRelief, licHeight); }
+  }
   view?.update(v);
 }
 
@@ -688,6 +746,7 @@ function createView() {
   plate.position.set((SLOT.x + SLOT.w / 2) / PW * W - W / 2, H / 2 - (SLOT.y + SLOT.h / 2) / PH * H, faceZ + lb);
   const plateSide = new THREE.ExtrudeGeometry(roundedShape(lw - 2 * lb, lh - 2 * lb, lr - lb), {depth: ld, bevelEnabled: true, bevelThickness: lb, bevelSize: lb, bevelSegments: 3, curveSegments: 12});
   plate.add(new THREE.Mesh(plateSide, new THREE.MeshPhysicalMaterial({color: 0x1a1b20, roughness: .3, clearcoat: 1, clearcoatRoughness: .08})));
+  const licBump = new THREE.CanvasTexture(licHeight);
   const licMesh = new THREE.Mesh(faceGeometry(licShape, lw, lh), new THREE.MeshPhysicalMaterial({map: licTex, roughness: .55, clearcoat: .7, clearcoatRoughness: .05, envMapIntensity: .25, toneMapped: false}));
   licMesh.position.z = ld + lb + .0004; plate.add(licMesh);
   card.add(plate);
@@ -876,6 +935,10 @@ function createView() {
     resize,
     update(v) {
       frontTex.needsUpdate = true; backTex.needsUpdate = true; licTex.needsUpdate = true; frontBump.needsUpdate = true; backBump.needsUpdate = true;
+      // Admin pass: the E1 is raised in 3D too.
+      const lm = licMesh.material, bump = v.staff ? licBump : null;
+      if (lm.normalMap !== bump) { lm.normalMap = bump; lm.normalScale.set(3, 3); lm.needsUpdate = true; }
+      if (bump) licBump.needsUpdate = true;
       rolePlate.visible = Boolean(v.role && roleSlot);
       if (rolePlate.visible) {
         roleTex.needsUpdate = true; roleBump.needsUpdate = true;
@@ -914,7 +977,7 @@ function ready() {
   if (crewLoaded && !picked) { inlineMessage(message, 'error', v.username ? 'Pick your username from the list.' : 'Add your username first.'); form.elements.username.focus(); return null; }
   if (!v.username) { inlineMessage(message, 'error', 'Add your username first.'); form.elements.username.focus(); return null; }
   if (!v.team) { inlineMessage(message, 'error', 'Choose your team.'); form.elements.team.focus(); return null; }
-  if (!v.level) { inlineMessage(message, 'error', 'Choose your crew licence level.'); form.elements.level.focus(); return null; }
+  if (!v.level && !v.staff) { inlineMessage(message, 'error', 'Choose your crew licence level.'); form.elements.level.focus(); return null; }
   inlineMessage(message, 'info', '');
   return v;
 }
@@ -988,7 +1051,7 @@ function videoBackground(v, f) {
     label('ENHYPEN MAMA GRAND PRIX 2026', 350, 30, 700, '#d4d5db', 5);
     label('CERTIFICATE OF PARTICIPATION', 394, 24, 600, '#9a9ca6', 6);
     label(v.username, 1532, 60, 700, '#fff');
-    label(`${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1584, 30, 600, col);
+    label(v.staff ? `EMGP Organizing Team · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1584, 30, 600, col);
     label('Different Colors. Same finish line.', 1636, 26, 400, '#c9cad0');
   } else if (f === FORMATS.square) {
     label(who, h - 64, 30, 700, '#fff');

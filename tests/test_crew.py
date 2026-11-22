@@ -21,6 +21,8 @@ lily,Meowcedes,All-Star,
 racerriki,Rikston Drift,All-Star,
 racerriki,Rikston Drift,Hall of Fame,
 @elle,Alpinoo,E1 Immortal,
+rio,Staff,,Circuit Operations,
+Rio,McJakey,All-Star,
 ghost,Nowhere,All-Star,
 '''
 EXPORT = '''"E1 username","Social link","Crew Licence level","Team"
@@ -65,7 +67,7 @@ class Crew(unittest.TestCase):
         self.assertEqual(self.call('/api/crew', CSV, auth=False)[0], 401)
         status, result = self.call('/api/crew', CSV)
         self.assertEqual(status, 200)
-        self.assertEqual((result['count'], result['roles'], result['skipped_lines']), (7, 1, [10]))
+        self.assertEqual((result['count'], result['roles'], result['skipped_lines']), (9, 2, [12]))
         self.assertTrue(self.call('/api/crew', auth=False)[1]['loaded'])
 
         found = self.call('/api/crew?q=%40JAKE', auth=False)[1]['results']
@@ -86,6 +88,10 @@ class Crew(unittest.TestCase):
         self.assertEqual([e['level'] for e in riki], [11])
         self.assertEqual(self.call(f'/api/crew?id={riki[0]["id"]}', auth=False)[1]['username'], 'racerriki')
         self.assertEqual(self.call('/api/crew?id=nope', auth=False)[0], 404)
+        # Staff: no team, no level; the same name as a crew member shows "EMGP Staff".
+        rio = {e['team']: e for e in self.call('/api/crew?q=rio', auth=False)[1]['results']}
+        self.assertEqual((rio['staff']['level'], rio['staff']['role'], rio['staff']['note']), (0, 'Circuit Operations', 'EMGP Staff'))
+        self.assertEqual(rio['mcjakey']['note'], 'McJakey')
 
     def test_export_format_and_bad_files(self):
         self.assertEqual(self.call('/api/crew', 'a,b\n1,2\n')[0], 400)
