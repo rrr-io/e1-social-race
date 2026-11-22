@@ -19,7 +19,8 @@ const TEAMS = {
   rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#13804f'},   // bottle green
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
   staff: {name: 'EMGP Admin', member: '', color: '#9a9ca6'},           // the organisers: own finish, no licence
-  crew: {name: 'EMGP Staff', member: '', color: '#9a9ca6'},            // staff (e.g. Paddock Announcers): like the admins, a step apart
+  crew: {name: 'EMGP Staff', member: '', color: '#9a9ca6'},
+  honorary: {name: 'EMGP Honorary', member: '', color: '#cdb98f'},   // special contributors: gold            // staff (e.g. Paddock Announcers): like the admins, a step apart
 };
 const CLASSIC = '#9a9ca6';   // the default (no team) colour, for who prefers it to the team colour
 // More than one role in the list ("Co-Team Captain; Social Media Creator"): the first is the main one.
@@ -61,7 +62,7 @@ function values() {
   // "Classic" colour: the same team, in neutral silver instead of the team colour.
   const team = base && form.elements.color?.value === 'classic' ? {...base, color: CLASSIC} : base;
   const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
-  const role = picked?.role || '', donor = Boolean(picked?.donor), tier = {staff: 'admin', crew: 'staff'}[form.elements.team.value] || '', staff = Boolean(tier);
+  const role = picked?.role || '', donor = Boolean(picked?.donor), tier = {staff: 'admin', crew: 'staff', honorary: 'gold'}[form.elements.team.value] || '', staff = Boolean(tier);
   // Creators and donors who did not race: no level, a licence of their own.
   const special = !staff && picked && !picked.level ? (roleList({role}).includes('Social Media Creator') ? 'creator' : donor ? 'supporter' : null) : null;
   return {username, key: picked?.username || username, team, level, role, donor, staff, tier, special, complete: Boolean(username && team && (level || staff || special) && (!crewLoaded || picked))};
@@ -153,19 +154,39 @@ function drawPlaceholder(ctx) {
 // white for the other admins: never a team colour), an art-deco double line over a chevron parquet,
 // a holographic serial sticker and the role in large type.
 // Admin: red frame for Race Control, white for the others. Radio (staff): dark violet. Never a team colour.
-const adminFrame = v => v.tier === 'staff' ? {c: '#33195c', ink: '#fff'} : v.role === 'Race Control' ? {c: '#e10600', ink: '#fff'} : {c: '#eef0f4', ink: '#111214'};
+const adminFrame = v => v.tier === 'gold' ? {c: '#b8902f', ink: '#1a1408'} : v.tier === 'staff' ? {c: '#33195c', ink: '#fff'} : v.role === 'Race Control' ? {c: '#e10600', ink: '#fff'} : {c: '#eef0f4', ink: '#111214'};
 const TIER = {admin: {pass: 'ADMIN PASS', tab: 'ADMIN', team: 'EMGP ADMIN TEAM', group: 'Admin team', video: 'EMGP Admin Team'},
-              staff: {pass: 'RADIO PASS', tab: 'RADIO', team: 'EMGP RADIO', group: 'EMGP Radio team', video: 'EMGP Radio'}};
+              staff: {pass: 'RADIO PASS', tab: 'RADIO', team: 'EMGP RADIO', group: 'EMGP Radio team', video: 'EMGP Radio'},
+              // Honorary (gold): a special contributor; the role column holds the title shown.
+              gold: {pass: 'HONORARY PASS', tab: '', team: 'EMGP HONORARY', group: 'honorary members', video: 'EMGP Honorary'}};
+function goldFill(ctx, y0, y1) {
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  [[0, '#fff3c4'], [.38, '#efcf7a'], [.52, '#8f6a1e'], [.62, '#e2bb5c'], [.84, '#fbe7a6'], [1, '#b98c2e']].forEach(([o, c]) => g.addColorStop(o, c));
+  return g;
+}
+const metalFill = (ctx, v, y0, y1) => v.tier === 'gold' ? goldFill(ctx, y0, y1) : chromeFill(ctx, y0, y1);
+function decoScales(ctx, colour) {
+  // Honorary pass: art-deco fan scales over the whole panel.
+  ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = 2;
+  const r = 44;
+  for (let row = 0, y = 0; y < CH + r; row++, y += r * .55) for (let x = (row % 2) * r; x < CW + r; x += r * 2) {
+    for (const k of [1, .66, .33]) { ctx.beginPath(); ctx.arc(x, y, r * k, Math.PI, Math.PI * 2); ctx.stroke(); }
+  }
+  ctx.restore();
+}
 const tierText = v => TIER[v.tier] || TIER.admin;
 const DECO = [[0, 640], [840, 640], [990, 790], [CW, 790]];
 const AB = 18, TAB = {w: 128, y: 470, r: 26};   // frame width; side tab (one raised piece with the frame)
 function decoLine(ctx, dy) { ctx.beginPath(); DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + dy) : ctx.moveTo(x, y + dy)); }
-function panelPath(ctx) {
+function panelPath(ctx, v) {
   // The recessed black panel: inside the frame, minus the side tab (bevelled corner where they meet).
   const x0 = AB, y0 = AB, x1 = CW - AB, y1 = CH - AB, r = RADIUS - AB, tx = x1 - TAB.w;
   ctx.beginPath(); ctx.moveTo(x0 + r, y0); ctx.lineTo(x1 - r, y0); ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
+  if (v?.tier === 'gold') { ctx.lineTo(x1, y1 - r); ctx.quadraticCurveTo(x1, y1, x1 - r, y1); }   // honorary: no tab
+  else {
   ctx.lineTo(x1, TAB.y); ctx.lineTo(tx + TAB.r, TAB.y); ctx.lineTo(tx, TAB.y + TAB.r);   // bevelled corner
-  ctx.lineTo(tx, y1); ctx.lineTo(x0 + r, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
+  ctx.lineTo(tx, y1);
+  } ctx.lineTo(x0 + r, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
   ctx.lineTo(x0, y0 + r); ctx.quadraticCurveTo(x0, y0, x0 + r, y0); ctx.closePath();
 }
 // Radio pass: the step goes up instead of down, over radio waves (concentric arcs) instead of the parquet.
@@ -180,8 +201,8 @@ function radioWaves(ctx, colour) {
   for (let r = 40; r < 1500; r += 30) { ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, Math.PI * 2); ctx.stroke(); }
   ctx.restore();
 }
-const passPattern = (ctx, v, colour) => v.tier === 'staff' ? radioWaves(ctx, colour) : parquet(ctx, colour);
-const passLine = (ctx, v, dy) => v.tier === 'staff' ? radioLine(ctx, dy) : decoLine(ctx, dy);
+const passPattern = (ctx, v, colour) => v.tier === 'gold' ? decoScales(ctx, colour) : v.tier === 'staff' ? radioWaves(ctx, colour) : parquet(ctx, colour);
+const passLine = (ctx, v, dy) => v.tier === 'gold' ? ctx.beginPath() : v.tier === 'staff' ? radioLine(ctx, dy) : decoLine(ctx, dy);
 function parquet(ctx, colour) {
   // Chevron parquet below the deco line.
   ctx.save(); ctx.beginPath(); DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + 26) : ctx.moveTo(x, y + 26)); ctx.lineTo(CW, CH); ctx.lineTo(0, CH); ctx.closePath(); ctx.clip();
@@ -208,18 +229,19 @@ function drawStaffPass(ctx, v) {
   const f = adminFrame(v);
   ctx.save(); roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
   // Frame and tab: one raised piece, lit from the top left.
-  ctx.fillStyle = f.c; ctx.fillRect(0, 0, CW, CH);
+  ctx.fillStyle = v.tier === 'gold' ? (() => { const gg = ctx.createLinearGradient(0, 0, CW, CH); [[0, '#f6e3a1'], [.3, '#c99a3a'], [.55, '#fff0bd'], [.8, '#a77a22'], [1, '#e5c06a']].forEach(([o, c]) => gg.addColorStop(o, c)); return gg; })() : f.c;
+  ctx.fillRect(0, 0, CW, CH);
   const lit = ctx.createLinearGradient(0, 0, CW, CH); lit.addColorStop(0, 'rgba(255,255,255,.28)'); lit.addColorStop(.5, 'rgba(255,255,255,0)'); lit.addColorStop(1, 'rgba(0,0,0,.28)');
   ctx.fillStyle = lit; ctx.fillRect(0, 0, CW, CH);
   // Panel, recessed: dark fill, then an inner shadow along its edge and a light lip on the frame.
-  ctx.save(); ctx.translate(-1.5, -1.5); panelPath(ctx); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.stroke(); ctx.restore();
-  ctx.save(); panelPath(ctx); ctx.clip();
+  ctx.save(); ctx.translate(-1.5, -1.5); panelPath(ctx, v); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.stroke(); ctx.restore();
+  ctx.save(); panelPath(ctx, v); ctx.clip();
   const g = ctx.createLinearGradient(0, 0, CW, CH); g.addColorStop(0, '#17181c'); g.addColorStop(1, '#08090a');
   ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
-  passPattern(ctx, v, 'rgba(220,224,232,.16)');
+  passPattern(ctx, v, v.tier === 'gold' ? 'rgba(226,190,100,.16)' : 'rgba(220,224,232,.16)');
   ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(230,233,238,.75)'; passLine(ctx, v, 0); ctx.stroke(); passLine(ctx, v, 14); ctx.stroke();
   ctx.shadowColor = 'rgba(0,0,0,.9)'; ctx.shadowBlur = 22; ctx.shadowOffsetX = 5; ctx.shadowOffsetY = 6;
-  panelPath(ctx); ctx.lineWidth = 16; ctx.strokeStyle = '#000'; ctx.stroke();
+  panelPath(ctx, v); ctx.lineWidth = 16; ctx.strokeStyle = '#000'; ctx.stroke();
   ctx.restore();
   // Header: E1 and the event.
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
@@ -228,35 +250,37 @@ function drawStaffPass(ctx, v) {
   // Holographic serial sticker.
   const sw = 330, sh = 100, sx = CW - AB - 60 - sw, sy = 62;
   const holo = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
-  ['#d9dce3', '#f3e6ff', '#d8f3ff', '#fff6d6', '#e6e8ee', '#ffe0ef', '#d9dce3'].forEach((col, i, a) => holo.addColorStop(i / (a.length - 1), col));
+  (v.tier === 'gold' ? ['#f6e3a1', '#d7ad4c', '#fff3c8', '#c4952f', '#f1d68a'] : ['#d9dce3', '#f3e6ff', '#d8f3ff', '#fff6d6', '#e6e8ee', '#ffe0ef', '#d9dce3']).forEach((col, i, a) => holo.addColorStop(i / (a.length - 1), col));
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3; roundRect(ctx, sx, sy, sw, sh, 10); ctx.fillStyle = holo; ctx.fill(); ctx.restore();
   let seed = 3; const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
   for (let i = 0; i < 240; i++) { ctx.fillStyle = `rgba(255,255,255,${.4 + rnd() * .6})`; ctx.fillRect(sx + rnd() * sw, sy + rnd() * sh, 1.3, 1.3); }
-  ctx.fillStyle = '#3a3550'; ctx.font = font(19, 700); spaced(ctx, tierText(v).pass, sx + 24, sy + 38, 4);
+  ctx.fillStyle = v.tier === 'gold' ? '#4a3510' : '#3a3550'; ctx.font = font(19, 700); spaced(ctx, tierText(v).pass, sx + 24, sy + 38, 4);
   ctx.font = font(32, 700); spaced(ctx, licenceNumber(v), sx + 24, sy + 80, 3);
   // Role on two lines in polished chrome; then the holder's name, large.
   const {lines, size} = adminRole(ctx, v);
   lines.forEach((l, i) => {
     const y = 316 + i * size * .95;
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(l, 80, y + 4);
-    ctx.fillStyle = chromeFill(ctx, y - size * .74, y); ctx.fillText(l, 78, y);
+    ctx.fillStyle = metalFill(ctx, v, y - size * .74, y); ctx.fillText(l, 78, y);
   });
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   const name = v.username || 'Your Name';
   ctx.fillStyle = '#fff'; fit(ctx, name, 760, 92, 700); ctx.fillText(name, 80, 534);
-  ctx.fillStyle = '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, tierText(v).team, 86, 600, 4);
+  ctx.fillStyle = v.tier === 'gold' ? '#d9bb72' : '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, tierText(v).team, 86, 600, 4);
   // ADMIN on the tab.
+  if (tierText(v).tab) {
   ctx.save(); ctx.translate(CW - AB - TAB.w / 2 + 22, CH - 74); ctx.rotate(-Math.PI / 2);
   ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.font = `italic ${font(72, 700)}`; ctx.fillText(tierText(v).tab, 2, 3);
   ctx.fillStyle = f.ink; ctx.fillText(tierText(v).tab, 0, 0);
   ctx.restore();
+  }
   ctx.restore();
 }
 // Height map for the 3D admin pass: frame and tab raised, panel lower, engraved lines.
 function drawStaffRelief(ctx, v) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, CW, CH);
-  panelPath(ctx); ctx.fillStyle = '#7a7a7a'; ctx.fill();
-  ctx.save(); panelPath(ctx); ctx.clip();
+  panelPath(ctx, v); ctx.fillStyle = '#7a7a7a'; ctx.fill();
+  ctx.save(); panelPath(ctx, v); ctx.clip();
   passPattern(ctx, v, '#d0d0d0'); ctx.lineWidth = 3; ctx.strokeStyle = '#d0d0d0'; passLine(ctx, v, 0); ctx.stroke(); passLine(ctx, v, 14); ctx.stroke();
   // The role, raised, so the chrome letters catch the light in 3D.
   const {lines, size} = adminRole(ctx, v); ctx.fillStyle = '#fff'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
@@ -339,6 +363,7 @@ const ADMIN_LOOKS = {
   champagne: {accent: '#cdb98f', base: ['#1f1c17', '#0c0b09']},
 };
 let ADMIN_LOOK = 'carbon';
+const tierLook = v => v.tier === 'gold' ? ADMIN_LOOKS.champagne : v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook();
 const adminLook = () => ADMIN_LOOKS[window.__adminLook] || ADMIN_LOOKS[ADMIN_LOOK];
 function carbonWeave(ctx) {
   // Carbon fibre twill: 2x2 woven tows, each with a soft sheen.
@@ -352,7 +377,7 @@ function carbonWeave(ctx) {
 }
 function passBase(ctx, c, v) {
   roundRect(ctx, 0, 0, PW, PH, PRADIUS); ctx.clip();
-  const look = v?.staff ? (v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook()) : null, [b0, b1] = look ? look.base : ['#1c1e24', '#0d0e11'];
+  const look = v?.staff ? tierLook(v) : null, [b0, b1] = look ? look.base : ['#1c1e24', '#0d0e11'];
   let g = ctx.createLinearGradient(0, 0, PW * .6, PH);
   g.addColorStop(0, b0); g.addColorStop(.6, b1); g.addColorStop(1, b1);
   ctx.fillStyle = g; ctx.fillRect(0, 0, PW, PH);
@@ -443,7 +468,7 @@ function wrapText(ctx, parts, x, y, maxWidth, lineHeight) {
   return y;
 }
 function drawPassFront(ctx, v, withLicence = true) {
-  const c = v.staff ? (v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook()).accent : v.team?.color || '#9a9ca6';
+  const c = v.staff ? tierLook(v).accent : v.team?.color || '#9a9ca6';
   ctx.save(); passBase(ctx, c, v);
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = c; ctx.fillRect(56, 98, 44, 6);
@@ -470,8 +495,13 @@ function drawPassFront(ctx, v, withLicence = true) {
   const name = v.username || 'your username';
   let y = v.staff ? wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
-    {text: ' ran the ENHYPEN MAMA Grand Prix 2026 as part of the ', color: '#c9cad0', weight: 400},
-    {text: tierText(v).group, color: '#fff', weight: 700}, {text: '.', color: '#c9cad0', weight: 400},
+    ...(v.tier === 'gold' ? [
+      {text: ' is one of the ', color: '#c9cad0', weight: 400}, {text: 'honorary members', color: '#fff', weight: 700},
+      {text: ' of the ENHYPEN MAMA Grand Prix 2026. Thank you for racing with us.', color: '#c9cad0', weight: 400},
+    ] : [
+      {text: ' ran the ENHYPEN MAMA Grand Prix 2026 as part of the ', color: '#c9cad0', weight: 400},
+      {text: tierText(v).group, color: '#fff', weight: 700}, {text: '.', color: '#c9cad0', weight: 400},
+    ]),
   ], 56, sy + sh + 66, PW - 112, 44) : v.special ? wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' supported the ENHYPEN MAMA Grand Prix 2026 as ', color: '#c9cad0', weight: 400},
@@ -541,7 +571,7 @@ function drawRoleTitle(ctx, x, y, v) {
   while (spacedWidth(ctx, title, ROLE_SP) > PW - 112 && size > 24) { size -= 2; ctx.font = font(size, 700); }
   ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   ctx.fillStyle = 'rgba(0,0,0,.55)'; spaced(ctx, title, x, y + 47, ROLE_SP);          // soft drop
-  ctx.fillStyle = chromeFill(ctx, y + 47 - size * .74, y + 47); spaced(ctx, title, x, y + 45, ROLE_SP);
+  ctx.fillStyle = metalFill(ctx, v, y + 47 - size * .74, y + 47); spaced(ctx, title, x, y + 45, ROLE_SP);
   const w = spacedWidth(ctx, title, ROLE_SP), more = roleList(v).slice(1);
   if (more.length) {
     // Second role: also in chrome, a step smaller, on its own line ("& SOCIAL MEDIA CREATOR").
@@ -549,7 +579,7 @@ function drawRoleTitle(ctx, x, y, v) {
     let s2 = 30; ctx.font = font(s2, 700);
     while (spacedWidth(ctx, second, 4) > PW - 112 && s2 > 20) { s2 -= 2; ctx.font = font(s2, 700); }
     ctx.fillStyle = 'rgba(0,0,0,.55)'; spaced(ctx, second, x, y + 92, 4);
-    ctx.fillStyle = chromeFill(ctx, y + 92 - s2 * .74, y + 92); spaced(ctx, second, x, y + 90, 4);
+    ctx.fillStyle = metalFill(ctx, v, y + 92 - s2 * .74, y + 92); spaced(ctx, second, x, y + 90, 4);
   }
   ctx.restore();
   return w;
@@ -558,8 +588,8 @@ function drawRoleBlock(ctx, v, y, withTitle) {
   // CREW ROLE ——— (hairline) / TITLE / description: quiet, engraved-certificate style.
   const roles = roleList(v), c = v.team?.color || '#9a9ca6';
   // Two roles: both in chrome (the second a step smaller), then the description of the main one.
-  const desc = (ROLES[roles[0]] ?? '').toUpperCase();
-  const label = roles.length > 1 ? 'CREW ROLES' : 'CREW ROLE';
+  const desc = (v.tier === 'gold' ? 'With our deepest gratitude' : ROLES[roles[0]] ?? '').toUpperCase();
+  const label = v.tier === 'gold' ? 'HONORARY TITLE' : roles.length > 1 ? 'CREW ROLES' : 'CREW ROLE';
   ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   ctx.fillStyle = c; ctx.font = font(14, 700); spaced(ctx, label, 56, y + 12, 4);
   const end = v.donor ? STICKER.x - STICKER.r - 40 : PW - 56;   // keep clear of the supporter sticker
@@ -707,7 +737,7 @@ function trophy(ctx, x, y, s, color) {
   ctx.fillRect(13, 40, 22, 3); ctx.restore();
 }
 function drawPassBack(ctx, v) {
-  const c = v.staff ? (v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook()).accent : v.team?.color || '#9a9ca6';
+  const c = v.staff ? tierLook(v).accent : v.team?.color || '#9a9ca6';
   ctx.save(); passBase(ctx, c, v);
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   if (logo.complete && logo.naturalWidth) { const h = 110, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, (PW - w) / 2, 106, w, h); }
@@ -1345,7 +1375,7 @@ function pick(e) {
   closeSuggest();
   nameChoice(e.x || []);
   // Donors start with the holographic finish (unless a finish was chosen).
-  if (e.donor && !finishChosen) form.elements.finish.value = 'holo';
+  if (!finishChosen && (e.donor || e.team === 'honorary')) form.elements.finish.value = e.team === 'honorary' ? 'gold' : 'holo';
 }
 let finishChosen = false;
 form.elements.finish.addEventListener('change', () => { finishChosen = true; });
