@@ -328,6 +328,9 @@ const FINISHES = {   // 3D only: the downloaded PNG stays clean
   aurora: {mode: 6, strength: .55},
   prism: {mode: 1, strength: .6},
   gold: {mode: 2, strength: .55},
+  sparkle: {mode: 7, strength: 1.4},
+  cosmos: {mode: 8, strength: .8},
+  rainbow: {mode: 9, strength: .65},
 };
 const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 // The admin certificate has its own finish, so it never looks like a team card.
@@ -994,8 +997,9 @@ function createView() {
         } else if (uMode == 4) {   // galaxy: a nebula that drifts with the angle, with stars
           vec2 q = vUv * vec2(1.0, 1.46) * 2.4 + tilt * 1.4;
           float n = fbm(q + fbm(q * 1.7 + uTime * .03));
-          vec3 neb = mix(vec3(.20, .10, .55), vec3(.95, .30, .75), smoothstep(.35, .75, n));
-          neb = mix(neb, vec3(.25, .75, 1.0), smoothstep(.62, .9, fbm(q * 2.3 - 4.0)));
+          // MAMA 2026 night sky: deep navy to cobalt, with icy blue highlights (black stays black: additive).
+          vec3 neb = mix(vec3(.02, .05, .20), vec3(.08, .28, .95), smoothstep(.35, .75, n));
+          neb = mix(neb, vec3(.55, .82, 1.0), smoothstep(.64, .92, fbm(q * 2.3 - 4.0)));
           float st = stars(vUv * vec2(120.0, 175.0) + tilt * 8.0, .975);
           col = neb + st; a = uStrength * (.3 + .7 * smoothstep(.25, .75, n)) + st;
         } else if (uMode == 5) {   // stardust: three layers of stars at different depths (parallax)
@@ -1011,6 +1015,34 @@ function createView() {
           float c1 = exp(-pow((y - .72) * 7.0, 2.0)), c2 = exp(-pow((y - .48 + .05 * sin(vUv.x * 9.0 - uTime * .3)) * 9.0, 2.0));
           float rays = .6 + .4 * fbm(vec2(vUv.x * 18.0 + tilt.x * 6.0, uTime * .1));
           col = vec3(.2, 1.0, .65) * c1 + vec3(.65, .35, 1.0) * c2; a = uStrength * (c1 + c2) * rays;
+        } else if (uMode == 7) {   // sparkle: dense glitter that twinkles with every move, plus star glints
+          vec2 g = vUv * vec2(230.0, 336.0), c = floor(g), f = fract(g) - .5;
+          float h = hash(c);
+          float sp = step(.78, h) * pow(max(0.0, sin(h * 80.0 + tilt.x * 42.0 + tilt.y * 33.0 + uTime * 1.8)), 14.0) * smoothstep(.5, .0, length(f));
+          vec2 g2 = vUv * vec2(34.0, 50.0), c2 = floor(g2), f2 = fract(g2) - .5;
+          float h2 = hash(c2 + 9.1);
+          f2 -= (vec2(hash(c2 + 2.3), hash(c2 + 5.1)) - .5) * .5;
+          float tw = step(.88, h2) * pow(max(0.0, sin(h2 * 50.0 + tilt.x * 24.0 - tilt.y * 18.0 + uTime * 1.2)), 18.0);
+          float cr = tw * (smoothstep(.05, .0, abs(f2.y)) * smoothstep(.5, .0, abs(f2.x)) + smoothstep(.05, .0, abs(f2.x)) * smoothstep(.5, .0, abs(f2.y)) + smoothstep(.15, .0, length(f2)));
+          col = mix(vec3(1.0), rainbow(h * 3.0 + tilt.x * 2.0), .45); a = uStrength * (sp * 1.6 + cr * 2.2) + .05 * rim;
+        } else if (uMode == 8) {   // cosmos: the trading-card holo, bubbles of every size with rainbow rims
+          float ring = 0.0;
+          for (int l = 0; l < 3; l++) {
+            float sc = 5.0 + float(l) * 6.0;
+            vec2 g = vUv * vec2(sc, sc * 1.46) + float(l) * 3.7, c = floor(g), f = fract(g) - .5;
+            vec2 o = (vec2(hash(c + 1.3), hash(c + 7.7)) - .5) * .4;
+            float r = .14 + .22 * hash(c + 4.2), d = length(f - o);
+            ring += smoothstep(.035, .0, abs(d - r)) * .9 + smoothstep(r, r * .2, d) * .22;
+          }
+          float t = vUv.x * .6 + vUv.y * .4 + tilt.x * 2.4 - tilt.y * 1.8;
+          col = rainbow(t + ring * .25); a = uStrength * (.14 * (.4 + rim) + ring * .7);
+        } else if (uMode == 9) {   // rainbow rare: a pastel rainbow over the whole card, with glittering diagonal bands
+          float t = vUv.x * .7 - vUv.y * .9 + tilt.x * 1.6 + tilt.y * 1.2;
+          vec3 pastel = mix(rainbow(t), vec3(1.0), .2);
+          float band = smoothstep(.55, 1.0, sin((vUv.x + vUv.y) * 55.0 + tilt.x * 12.0 - tilt.y * 8.0) * .5 + .5);
+          vec2 g = vUv * vec2(180.0, 262.0), c = floor(g);
+          float gl = step(.86, hash(c)) * pow(max(0.0, sin(hash(c + 3.1) * 60.0 + tilt.x * 36.0 + tilt.y * 28.0)), 10.0);
+          col = mix(pastel, vec3(1.0), gl); a = uStrength * (.32 + .3 * band) + gl * .9;
         } else {                   // none: only a soft sheen
           float s = exp(-pow((vUv.x - .5 - tilt.x * 1.5) * 3.0, 2.0)); col = vec3(1.0); a = uStrength * .35 * s;
         }
@@ -1018,6 +1050,8 @@ function createView() {
       }`,
   });
   const holoMesh = new THREE.Mesh(face, holo); holoMesh.position.z = faceZ + .0006; card.add(holoMesh);
+  // The same foil on the back.
+  const holoBack = new THREE.Mesh(face, holo); holoBack.rotation.y = Math.PI; holoBack.position.z = -faceZ - .0006; card.add(holoBack);
 
   // Interaction: drag to turn, flip, phone motion, idle sway.
   const state = {ry: -.35, rx: .12, try: -.35, trx: .12, base: -.35, flip: 0, dragging: false, last: 0, vx: 0, motion: null, spin: null};
