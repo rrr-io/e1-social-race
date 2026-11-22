@@ -209,21 +209,17 @@ function drawStaffPass(ctx, v) {
   for (let i = 0; i < 240; i++) { ctx.fillStyle = `rgba(255,255,255,${.4 + rnd() * .6})`; ctx.fillRect(sx + rnd() * sw, sy + rnd() * sh, 1.3, 1.3); }
   ctx.fillStyle = '#3a3550'; ctx.font = font(19, 700); spaced(ctx, 'ADMIN PASS', sx + 24, sy + 38, 4);
   ctx.font = font(32, 700); spaced(ctx, licenceNumber(v), sx + 24, sy + 80, 3);
-  // Role on two lines in polished chrome, with glints; then the holder's name, large.
+  // Role on two lines in polished chrome; then the holder's name, large.
   const {lines, size} = adminRole(ctx, v);
   lines.forEach((l, i) => {
     const y = 316 + i * size * .95;
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(l, 80, y + 4);
     ctx.fillStyle = chromeFill(ctx, y - size * .74, y); ctx.fillText(l, 78, y);
   });
-  ctx.save();
-  const w0 = ctx.measureText(lines[0]).width, w1 = ctx.measureText(lines.at(-1)).width;
-  sparkle(ctx, 78 + w0 - 10, 316 - size * .66, 30); sparkle(ctx, 78 + w1 * .32, 316 + (lines.length - 1) * size * .95 - size * .7, 18, .85);
-  ctx.restore();
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   const name = v.username || 'Your Name';
   ctx.fillStyle = '#fff'; fit(ctx, name, 760, 92, 700); ctx.fillText(name, 80, 534);
-  ctx.fillStyle = '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, 'EMGP ADMIN TEAM', 86, 578, 4);
+  ctx.fillStyle = '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, 'EMGP ADMIN TEAM', 86, 600, 4);
   // ADMIN on the tab.
   ctx.save(); ctx.translate(CW - AB - TAB.w / 2 + 22, CH - 74); ctx.rotate(-Math.PI / 2);
   ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.font = `italic ${font(72, 700)}`; ctx.fillText('ADMIN', 2, 3);
@@ -418,7 +414,7 @@ function drawPassFront(ctx, v, withLicence = true) {
   let y = v.staff ? wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' ran the ENHYPEN MAMA Grand Prix 2026 as part of the ', color: '#c9cad0', weight: 400},
-    {text: 'Admin team', color: '#fff', weight: 700}, {text: ', from the first lap to the chequered flag.', color: '#c9cad0', weight: 400},
+    {text: 'Admin team', color: '#fff', weight: 700}, {text: '.', color: '#c9cad0', weight: 400},
   ], 56, sy + sh + 66, PW - 112, 44) : wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' raced with ', color: '#c9cad0', weight: 400}, {text: v.team ? teamLabel(v.team, ' · ') : 'your team', color: c, weight: 700},
