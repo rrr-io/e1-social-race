@@ -26,7 +26,9 @@ TEAMS = {  # key: (scuderia, member team)
     'alpinoo': ('Alpinoo', 'Team SUNOO'), 'meowcedes': ('Meowcedes', 'Team JUNGWON'), 'rikston': ('Rikston Drift', 'Team NI-KI'),
     'independent': ('Independent Crew', 'Independent Crew'),
     # The organisers: no team and no crew licence level, a staff certificate instead.
-    'staff': ('EMGP Admin', 'EMGP Staff', 'Admin', 'Staff', 'Organising Team'),
+    'staff': ('EMGP Admin', 'Admin', 'Organising Team'),
+    # Staff who are not admins (e.g. Paddock Announcers): no level either, a staff certificate.
+    'crew': ('EMGP Staff', 'EMGP Radio', 'Staff', 'Radio'),
 }
 TEAM_KEYS = {n.casefold(): k for k, names in TEAMS.items() for n in (k, *names)}
 LEVELS = ['Paddock Rookie', 'Race Ready', 'Fast Lane', 'Pit Lane Pro', 'Redline Ace', 'Paddock Icon', 'Circuit Storm', 'E1 Elite',
@@ -88,7 +90,7 @@ def parse(text):
         handles = x_handles(row.get(cols['x']) or '') if cols['x'] else []
         donor = bool(cols['donor']) and (row.get(cols['donor']) or '').strip().casefold() not in NO
         # No crew licence level (stored as 0): the admins, and creators or donors who did not race.
-        if team == 'staff' or (level is None and not (row.get(cols['level']) or '').strip() and (NO_LEVEL_ROLES & set(re.split(r'\s*(?:;|\||/|\+|&|·)\s*', role)) or donor)):
+        if team in ('staff', 'crew') or (level is None and not (row.get(cols['level']) or '').strip() and (NO_LEVEL_ROLES & set(re.split(r'\s*(?:;|\||/|\+|&|·)\s*', role)) or donor)):
             level = -1
         if not name.lstrip('@') or team is None or level is None:
             skipped.append(line)

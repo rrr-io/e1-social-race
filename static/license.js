@@ -19,6 +19,7 @@ const TEAMS = {
   rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#13804f'},   // bottle green
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
   staff: {name: 'EMGP Admin', member: '', color: '#9a9ca6'},           // the organisers: own finish, no licence
+  crew: {name: 'EMGP Staff', member: '', color: '#9a9ca6'},            // staff (e.g. Paddock Announcers): like the admins, a step apart
 };
 const CLASSIC = '#9a9ca6';   // the default (no team) colour, for who prefers it to the team colour
 // More than one role in the list ("Co-Team Captain; Social Media Creator"): the first is the main one.
@@ -28,6 +29,7 @@ const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}
 const ROLES = {
   'Team Manager': 'Team management', 'Team Captain': 'Leader', 'Co-Team Captain': 'Co-leader', 'Race Engineer': 'Race strategist',
   'Social Media Creator': 'Social Grid Race',
+  'Paddock Announcer': 'EMGP Radio · Announcements',
   'Circuit Operations': 'Admin team', 'Admin Media Crew': 'Admin team · Media', 'Race Control': 'Admin team · Race direction',
   'E1 System Steward': 'Race steward · Voting proof checker', 'Manual Steward': 'Race steward · Proof encoder & checker', 'Media Crew': 'Race steward · Media',
 };
@@ -59,10 +61,10 @@ function values() {
   // "Classic" colour: the same team, in neutral silver instead of the team colour.
   const team = base && form.elements.color?.value === 'classic' ? {...base, color: CLASSIC} : base;
   const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
-  const role = picked?.role || '', donor = Boolean(picked?.donor), staff = form.elements.team.value === 'staff';
+  const role = picked?.role || '', donor = Boolean(picked?.donor), tier = {staff: 'admin', crew: 'staff'}[form.elements.team.value] || '', staff = Boolean(tier);
   // Creators and donors who did not race: no level, a licence of their own.
   const special = !staff && picked && !picked.level ? (roleList({role}).includes('Social Media Creator') ? 'creator' : donor ? 'supporter' : null) : null;
-  return {username, key: picked?.username || username, team, level, role, donor, staff, special, complete: Boolean(username && team && (level || staff || special) && (!crewLoaded || picked))};
+  return {username, key: picked?.username || username, team, level, role, donor, staff, tier, special, complete: Boolean(username && team && (level || staff || special) && (!crewLoaded || picked))};
 }
 
 // 2D card drawing ------------------------------------------------------------------
@@ -150,7 +152,11 @@ function drawPlaceholder(ctx) {
 // Inspired by paddock credentials: matte black, a coloured frame and corner tab (red for Race Control,
 // white for the other admins: never a team colour), an art-deco double line over a chevron parquet,
 // a holographic serial sticker and the role in large type.
-const adminFrame = v => v.role === 'Race Control' ? {c: '#e10600', ink: '#fff'} : {c: '#eef0f4', ink: '#111214'};
+// Admin: red frame for Race Control, white for the others. Radio (staff): dark violet. Never a team colour.
+const adminFrame = v => v.tier === 'staff' ? {c: '#33195c', ink: '#fff'} : v.role === 'Race Control' ? {c: '#e10600', ink: '#fff'} : {c: '#eef0f4', ink: '#111214'};
+const TIER = {admin: {pass: 'ADMIN PASS', tab: 'ADMIN', team: 'EMGP ADMIN TEAM', group: 'Admin team', video: 'EMGP Admin Team'},
+              staff: {pass: 'RADIO PASS', tab: 'RADIO', team: 'EMGP RADIO', group: 'EMGP Radio team', video: 'EMGP Radio'}};
+const tierText = v => TIER[v.tier] || TIER.admin;
 const DECO = [[0, 640], [840, 640], [990, 790], [CW, 790]];
 const AB = 18, TAB = {w: 128, y: 470, r: 26};   // frame width; side tab (one raised piece with the frame)
 function decoLine(ctx, dy) { ctx.beginPath(); DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + dy) : ctx.moveTo(x, y + dy)); }
@@ -162,6 +168,24 @@ function panelPath(ctx) {
   ctx.lineTo(tx, y1); ctx.lineTo(x0 + r, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
   ctx.lineTo(x0, y0 + r); ctx.quadraticCurveTo(x0, y0, x0 + r, y0); ctx.closePath();
 }
+// Radio pass: the step goes up instead of down, over a diamond lattice instead of the parquet.
+const RADIO_DECO = [[0, 740], [700, 740], [860, 580], [CW, 580]];
+function radioLine(ctx, dy) { ctx.beginPath(); RADIO_DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + dy) : ctx.moveTo(x, y + dy)); }
+function radioWaves(ctx, colour) {
+  ctx.save(); ctx.beginPath(); RADIO_DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + 26) : ctx.moveTo(x, y + 26));
+  ctx.lineTo(CW, CH); ctx.lineTo(0, CH); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle = colour; ctx.lineWidth = 2.2;
+  const d = 46;   // diamonds: two sets of diagonals, with a dot in every other diamond
+  for (let k = -CH; k < CW + CH; k += d) {
+    ctx.beginPath(); ctx.moveTo(k, 500); ctx.lineTo(k + CH, 500 + CH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(k, 500); ctx.lineTo(k - CH, 500 + CH); ctx.stroke();
+  }
+  ctx.fillStyle = colour;
+  for (let y = 500 + d / 2; y < CH; y += d) for (let x = ((y - 500) / d % 2 ? d / 2 : 0); x < CW; x += d) { ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+const passPattern = (ctx, v, colour) => v.tier === 'staff' ? radioWaves(ctx, colour) : parquet(ctx, colour);
+const passLine = (ctx, v, dy) => v.tier === 'staff' ? radioLine(ctx, dy) : decoLine(ctx, dy);
 function parquet(ctx, colour) {
   // Chevron parquet below the deco line.
   ctx.save(); ctx.beginPath(); DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + 26) : ctx.moveTo(x, y + 26)); ctx.lineTo(CW, CH); ctx.lineTo(0, CH); ctx.closePath(); ctx.clip();
@@ -196,8 +220,8 @@ function drawStaffPass(ctx, v) {
   ctx.save(); panelPath(ctx); ctx.clip();
   const g = ctx.createLinearGradient(0, 0, CW, CH); g.addColorStop(0, '#17181c'); g.addColorStop(1, '#08090a');
   ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
-  parquet(ctx, 'rgba(220,224,232,.16)');
-  ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(230,233,238,.75)'; decoLine(ctx, 0); ctx.stroke(); decoLine(ctx, 14); ctx.stroke();
+  passPattern(ctx, v, 'rgba(220,224,232,.16)');
+  ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(230,233,238,.75)'; passLine(ctx, v, 0); ctx.stroke(); passLine(ctx, v, 14); ctx.stroke();
   ctx.shadowColor = 'rgba(0,0,0,.9)'; ctx.shadowBlur = 22; ctx.shadowOffsetX = 5; ctx.shadowOffsetY = 6;
   panelPath(ctx); ctx.lineWidth = 16; ctx.strokeStyle = '#000'; ctx.stroke();
   ctx.restore();
@@ -212,7 +236,7 @@ function drawStaffPass(ctx, v) {
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3; roundRect(ctx, sx, sy, sw, sh, 10); ctx.fillStyle = holo; ctx.fill(); ctx.restore();
   let seed = 3; const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
   for (let i = 0; i < 240; i++) { ctx.fillStyle = `rgba(255,255,255,${.4 + rnd() * .6})`; ctx.fillRect(sx + rnd() * sw, sy + rnd() * sh, 1.3, 1.3); }
-  ctx.fillStyle = '#3a3550'; ctx.font = font(19, 700); spaced(ctx, 'ADMIN PASS', sx + 24, sy + 38, 4);
+  ctx.fillStyle = '#3a3550'; ctx.font = font(19, 700); spaced(ctx, tierText(v).pass, sx + 24, sy + 38, 4);
   ctx.font = font(32, 700); spaced(ctx, licenceNumber(v), sx + 24, sy + 80, 3);
   // Role on two lines in polished chrome; then the holder's name, large.
   const {lines, size} = adminRole(ctx, v);
@@ -224,11 +248,11 @@ function drawStaffPass(ctx, v) {
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   const name = v.username || 'Your Name';
   ctx.fillStyle = '#fff'; fit(ctx, name, 760, 92, 700); ctx.fillText(name, 80, 534);
-  ctx.fillStyle = '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, 'EMGP ADMIN TEAM', 86, 600, 4);
+  ctx.fillStyle = '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, tierText(v).team, 86, 600, 4);
   // ADMIN on the tab.
   ctx.save(); ctx.translate(CW - AB - TAB.w / 2 + 22, CH - 74); ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.font = `italic ${font(72, 700)}`; ctx.fillText('ADMIN', 2, 3);
-  ctx.fillStyle = f.ink; ctx.fillText('ADMIN', 0, 0);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.font = `italic ${font(72, 700)}`; ctx.fillText(tierText(v).tab, 2, 3);
+  ctx.fillStyle = f.ink; ctx.fillText(tierText(v).tab, 0, 0);
   ctx.restore();
   ctx.restore();
 }
@@ -237,7 +261,7 @@ function drawStaffRelief(ctx, v) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, CW, CH);
   panelPath(ctx); ctx.fillStyle = '#7a7a7a'; ctx.fill();
   ctx.save(); panelPath(ctx); ctx.clip();
-  parquet(ctx, '#d0d0d0'); ctx.lineWidth = 3; ctx.strokeStyle = '#d0d0d0'; decoLine(ctx, 0); ctx.stroke(); decoLine(ctx, 14); ctx.stroke();
+  passPattern(ctx, v, '#d0d0d0'); ctx.lineWidth = 3; ctx.strokeStyle = '#d0d0d0'; passLine(ctx, v, 0); ctx.stroke(); passLine(ctx, v, 14); ctx.stroke();
   // The role, raised, so the chrome letters catch the light in 3D.
   const {lines, size} = adminRole(ctx, v); ctx.fillStyle = '#fff'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   lines.forEach((l, i) => ctx.fillText(l, 78, 316 + i * size * .95));
@@ -330,7 +354,7 @@ function carbonWeave(ctx) {
 }
 function passBase(ctx, c, v) {
   roundRect(ctx, 0, 0, PW, PH, PRADIUS); ctx.clip();
-  const look = v?.staff ? adminLook() : null, [b0, b1] = look ? look.base : ['#1c1e24', '#0d0e11'];
+  const look = v?.staff ? (v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook()) : null, [b0, b1] = look ? look.base : ['#1c1e24', '#0d0e11'];
   let g = ctx.createLinearGradient(0, 0, PW * .6, PH);
   g.addColorStop(0, b0); g.addColorStop(.6, b1); g.addColorStop(1, b1);
   ctx.fillStyle = g; ctx.fillRect(0, 0, PW, PH);
@@ -421,7 +445,7 @@ function wrapText(ctx, parts, x, y, maxWidth, lineHeight) {
   return y;
 }
 function drawPassFront(ctx, v, withLicence = true) {
-  const c = v.staff ? adminLook().accent : v.team?.color || '#9a9ca6';
+  const c = v.staff ? (v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook()).accent : v.team?.color || '#9a9ca6';
   ctx.save(); passBase(ctx, c, v);
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = c; ctx.fillRect(56, 98, 44, 6);
@@ -449,7 +473,7 @@ function drawPassFront(ctx, v, withLicence = true) {
   let y = v.staff ? wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' ran the ENHYPEN MAMA Grand Prix 2026 as part of the ', color: '#c9cad0', weight: 400},
-    {text: 'Admin team', color: '#fff', weight: 700}, {text: '.', color: '#c9cad0', weight: 400},
+    {text: tierText(v).group, color: '#fff', weight: 700}, {text: '.', color: '#c9cad0', weight: 400},
   ], 56, sy + sh + 66, PW - 112, 44) : v.special ? wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' supported the ENHYPEN MAMA Grand Prix 2026 as ', color: '#c9cad0', weight: 400},
@@ -685,7 +709,7 @@ function trophy(ctx, x, y, s, color) {
   ctx.fillRect(13, 40, 22, 3); ctx.restore();
 }
 function drawPassBack(ctx, v) {
-  const c = v.staff ? adminLook().accent : v.team?.color || '#9a9ca6';
+  const c = v.staff ? (v.tier === 'staff' ? ADMIN_LOOKS.graphite : adminLook()).accent : v.team?.color || '#9a9ca6';
   ctx.save(); passBase(ctx, c, v);
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   if (logo.complete && logo.naturalWidth) { const h = 110, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, (PW - w) / 2, 106, w, h); }
@@ -1177,7 +1201,7 @@ function videoBackground(v, f) {
     label('ENHYPEN MAMA GRAND PRIX 2026', 350, 30, 700, '#d4d5db', 5);
     label('CERTIFICATE OF PARTICIPATION', 394, 24, 600, '#9a9ca6', 6);
     label(v.username, 1532, 60, 700, '#fff');
-    label(v.staff ? `EMGP Admin Team · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level ? v.level.name : SPECIAL[v.special]?.line || ''}`, 1584, 30, 600, col);
+    label(v.staff ? `${tierText(v).video} · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level ? v.level.name : SPECIAL[v.special]?.line || ''}`, 1584, 30, 600, col);
     label('Different Colors. Same finish line.', 1636, 26, 400, '#c9cad0');
   } else if (f === FORMATS.square) {
     label(who, h - 64, 30, 700, '#fff');
