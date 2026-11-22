@@ -35,6 +35,7 @@ LEVELS = ['Paddock Rookie', 'Race Ready', 'Fast Lane', 'Pit Lane Pro', 'Redline 
 LEVEL_INDEX = {n.casefold(): i for i, n in enumerate(LEVELS)}
 COLUMNS = {'username': ('username', 'e1 username', 'nickname'), 'team': ('team', 'scuderia'),
            'level': ('level', 'crew licence level', 'crew license level'), 'role': ('role',), 'x': ('x', 'social link'), 'donor': ('donor', 'supporter', 'donated')}
+NO_LEVEL_ROLES = {'Social Media Creator'}
 NO = {'', 'no', 'n', 'false', 'falso', '0', '-', 'none'}
 X_HANDLE = re.compile(r'(?:x|twitter)\.com/@?([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])')
 NOT_HANDLES = {'i', 'home', 'intent', 'share', 'search', 'hashtag', 'explore', 'enmamagrandprix'}  # the project account is not a crew handle
@@ -83,11 +84,12 @@ def parse(text):
         name = (row.get(cols['username']) or '').strip()[:40]
         team = TEAM_KEYS.get((row.get(cols['team']) or '').strip().casefold())
         level = LEVEL_INDEX.get((row.get(cols['level']) or '').strip().casefold())
-        if team == 'staff':
-            level = -1   # staff: no level (stored as 0)
         role = (row.get(cols['role']) or '').strip()[:60] if cols['role'] else ''
         handles = x_handles(row.get(cols['x']) or '') if cols['x'] else []
         donor = bool(cols['donor']) and (row.get(cols['donor']) or '').strip().casefold() not in NO
+        # No crew licence level (stored as 0): the admins, and creators or donors who did not race.
+        if team == 'staff' or (level is None and not (row.get(cols['level']) or '').strip() and (role in NO_LEVEL_ROLES or donor)):
+            level = -1
         if not name.lstrip('@') or team is None or level is None:
             skipped.append(line)
             continue

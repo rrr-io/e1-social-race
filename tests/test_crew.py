@@ -22,6 +22,9 @@ racerriki,Rikston Drift,All-Star,
 racerriki,Rikston Drift,Hall of Fame,
 @elle,Alpinoo,E1 Immortal,
 rio,EMGP Admin,,Circuit Operations,
+creo,McJakey,,Social Media Creator,
+giver,Alpinoo,,,yes
+nobody,Alpinoo,,,
 Rio,McJakey,All-Star,
 ghost,Nowhere,All-Star,
 '''
@@ -67,7 +70,7 @@ class Crew(unittest.TestCase):
         self.assertEqual(self.call('/api/crew', CSV, auth=False)[0], 401)
         status, result = self.call('/api/crew', CSV)
         self.assertEqual(status, 200)
-        self.assertEqual((result['count'], result['roles'], result['skipped_lines']), (9, 2, [12]))
+        self.assertEqual((result['count'], result['roles'], result['skipped_lines']), (11, 3, [13, 15]))
         self.assertTrue(self.call('/api/crew', auth=False)[1]['loaded'])
 
         found = self.call('/api/crew?q=%40JAKE', auth=False)[1]['results']
@@ -92,6 +95,10 @@ class Crew(unittest.TestCase):
         rio = {e['team']: e for e in self.call('/api/crew?q=rio', auth=False)[1]['results']}
         self.assertEqual((rio['staff']['level'], rio['staff']['role'], rio['staff']['note']), (0, 'Circuit Operations', 'EMGP Admin'))
         self.assertEqual(rio['mcjakey']['note'], 'McJakey')
+        # Creators and donors who did not race: in the list without a level.
+        creo = self.call('/api/crew?q=creo', auth=False)[1]['results'][0]
+        self.assertEqual((creo['team'], creo['level'], creo['role']), ('mcjakey', 0, 'Social Media Creator'))
+        self.assertEqual(self.call('/api/crew?q=giver', auth=False)[1]['results'][0]['level'], 0)
 
     def test_export_format_and_bad_files(self):
         self.assertEqual(self.call('/api/crew', 'a,b\n1,2\n')[0], 400)

@@ -25,6 +25,7 @@ const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}
 // Coordinator roles from the E1 glossary: what each one did, shown under the role on the certificate.
 const ROLES = {
   'Team Manager': 'Team management', 'Team Captain': 'Leader', 'Co-Team Captain': 'Co-leader', 'Race Engineer': 'Race strategist',
+  'Social Media Creator': 'Social Grid Race',
   'Circuit Operations': 'Admin team', 'Admin Media Crew': 'Admin team · Media', 'Race Control': 'Admin team · Race direction',
   'E1 System Steward': 'Race steward · Voting proof checker', 'Manual Steward': 'Race steward · Proof encoder & checker', 'Media Crew': 'Race steward · Media',
 };
@@ -57,7 +58,9 @@ function values() {
   const team = base && form.elements.color?.value === 'classic' ? {...base, color: CLASSIC} : base;
   const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
   const role = picked?.role || '', donor = Boolean(picked?.donor), staff = form.elements.team.value === 'staff';
-  return {username, key: picked?.username || username, team, level, role, donor, staff, complete: Boolean(username && team && (level || staff) && (!crewLoaded || picked))};
+  // Creators and donors who did not race: no level, a licence of their own.
+  const special = !staff && picked && !picked.level ? (role === 'Social Media Creator' ? 'creator' : donor ? 'supporter' : null) : null;
+  return {username, key: picked?.username || username, team, level, role, donor, staff, special, complete: Boolean(username && team && (level || staff || special) && (!crewLoaded || picked))};
 }
 
 // 2D card drawing ------------------------------------------------------------------
@@ -238,8 +241,38 @@ function drawStaffRelief(ctx, v) {
   lines.forEach((l, i) => ctx.fillText(l, 78, 316 + i * size * .95));
   ctx.restore();
 }
+// Creator / supporter licence: the base crew licence layout (paper, red bar, car badge) with their own
+// title and a reference to what they did instead of a level, and team-colour stripes.
+const SPECIAL = {
+  creator: {title: 'CREATOR LICENCE', line: 'SOCIAL MEDIA CREATOR', foot: 'SOCIAL GRID RACE · 2026'},
+  supporter: {title: 'SUPPORTER LICENCE', line: 'CAMPAIGN SUPPORTER', foot: 'EMGP CAMPAIGN · 2026'},
+};
+async function baseArt() { return design(LEVELS[0]); }
+function drawSpecialLicence(ctx, v, base) {
+  const k = SPECIAL[v.special], c = v.team?.color || '#9a9ca6';
+  ctx.save(); roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
+  ctx.fillStyle = '#eeeae3'; ctx.fillRect(0, 0, CW, CH);   // the paper of the base design
+  // The car badge of the crew licences (bottom right of the base design).
+  if (base) ctx.drawImage(base, 1120, 690, 440, 190, 1120, 690, 440, 190);
+  // Team-colour stripes where the level motif would be.
+  ctx.save(); ctx.translate(1240, 0); ctx.transform(1, 0, -.75, 1, 0, 0);
+  [[600, 64], [690, 64], [780, 22]].forEach(([x, w]) => { ctx.fillStyle = c; ctx.fillRect(x - 600 + 330, 360, w, 250); });
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.fillStyle = RED; ctx.fillRect(52, 126, 56, 7);
+  ctx.fillStyle = '#26282e'; ctx.font = font(27, 700); spaced(ctx, 'ENHYPEN MAMA GRAND PRIX', 132, 139, 3);
+  ctx.fillStyle = '#1d1f24'; fit(ctx, k.title, 860, 84, 700); ctx.textAlign = 'right'; ctx.fillText(k.title, CW - 92, 158); ctx.textAlign = 'left';
+  const name = v.username || 'Your Name';
+  ctx.fillStyle = '#1d1f24'; fit(ctx, name, 900, 81, 700); ctx.fillText(name, 88, 386);
+  ctx.fillStyle = '#5a5d66'; fit(ctx, teamLabel(v.team, ' - '), 900, 46, 600); ctx.fillText(teamLabel(v.team, ' - '), 89, 463);
+  ctx.fillStyle = '#1d1f24'; fit(ctx, k.line, 980, 84, 700); ctx.fillText(k.line, 90, 612);
+  ctx.fillStyle = 'rgba(30,32,38,.25)'; ctx.fillRect(90, 758, 1050, 2);
+  ctx.fillStyle = '#26282e'; ctx.font = font(38, 700); ctx.fillText(k.foot, 90, 822);
+  ctx.restore();
+}
 function drawLicence(ctx, v, art) {
   if (v.staff) return drawStaffPass(ctx, v);
+  if (v.special) return drawSpecialLicence(ctx, v, art);
   ctx.save();
   roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
   if (art) ctx.drawImage(art, 0, 0, CW, CH); else drawPlaceholder(ctx);
@@ -415,6 +448,12 @@ function drawPassFront(ctx, v, withLicence = true) {
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' ran the ENHYPEN MAMA Grand Prix 2026 as part of the ', color: '#c9cad0', weight: 400},
     {text: 'Admin team', color: '#fff', weight: 700}, {text: '.', color: '#c9cad0', weight: 400},
+  ], 56, sy + sh + 66, PW - 112, 44) : v.special ? wrapText(ctx, [
+    {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
+    {text: ' supported the ENHYPEN MAMA Grand Prix 2026 as ', color: '#c9cad0', weight: 400},
+    {text: v.special === 'creator' ? 'a Social Media Creator' : 'a campaign supporter', color: '#fff', weight: 700},
+    {text: v.special === 'creator' ? ' for ' : ' of ', color: '#c9cad0', weight: 400}, {text: teamLabel(v.team, ' · '), color: c, weight: 700},
+    {text: '.', color: '#c9cad0', weight: 400},
   ], 56, sy + sh + 66, PW - 112, 44) : wrapText(ctx, [
     {text: 'This certifies that ', color: '#c9cad0', weight: 400}, {text: name, color: '#fff', weight: 700},
     {text: ' raced with ', color: '#c9cad0', weight: 400}, {text: v.team ? teamLabel(v.team, ' · ') : 'your team', color: c, weight: 700},
@@ -719,7 +758,7 @@ function heightFrom(src, dst) {
 let paintId = 0;
 async function paint() {
   const v = values(), id = ++paintId;
-  const art = v.level ? await design(v.level) : null;
+  const art = v.level ? await design(v.level) : v.special ? await baseArt() : null;
   if (id !== paintId) return;   // a newer change is already being drawn
   const lctx = licence.getContext('2d');
   lctx.setTransform(SCALE, 0, 0, SCALE, 0, 0); lctx.clearRect(0, 0, CW, CH); drawLicence(lctx, v, art);
@@ -1050,7 +1089,7 @@ function ready() {
   if (crewLoaded && !picked) { inlineMessage(message, 'error', v.username ? 'Pick your username from the list.' : 'Add your username first.'); form.elements.username.focus(); return null; }
   if (!v.username) { inlineMessage(message, 'error', 'Add your username first.'); form.elements.username.focus(); return null; }
   if (!v.team) { inlineMessage(message, 'error', 'Choose your team.'); form.elements.team.focus(); return null; }
-  if (!v.level && !v.staff) { inlineMessage(message, 'error', 'Choose your crew licence level.'); form.elements.level.focus(); return null; }
+  if (!v.level && !v.staff && !v.special) { inlineMessage(message, 'error', 'Choose your crew licence level.'); form.elements.level.focus(); return null; }
   inlineMessage(message, 'info', '');
   return v;
 }
@@ -1124,7 +1163,7 @@ function videoBackground(v, f) {
     label('ENHYPEN MAMA GRAND PRIX 2026', 350, 30, 700, '#d4d5db', 5);
     label('CERTIFICATE OF PARTICIPATION', 394, 24, 600, '#9a9ca6', 6);
     label(v.username, 1532, 60, 700, '#fff');
-    label(v.staff ? `EMGP Admin Team · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1584, 30, 600, col);
+    label(v.staff ? `EMGP Admin Team · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level ? v.level.name : SPECIAL[v.special]?.line || ''}`, 1584, 30, 600, col);
     label('Different Colors. Same finish line.', 1636, 26, 400, '#c9cad0');
   } else if (f === FORMATS.square) {
     label(who, h - 64, 30, 700, '#fff');
