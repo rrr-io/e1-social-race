@@ -1120,7 +1120,8 @@ function createView() {
       card.rotation.set(state.rx, state.ry, 0);
     }
     // Float and shadow follow the card.
-    card.position.y = reduced ? 0 : Math.sin(t * 1.3) * .025;
+    // While recording the card does not float, so the last frame matches the first and the video loops without a jump.
+    card.position.y = reduced || state.spin ? 0 : Math.sin(t * 1.3) * .025;
     const turn = Math.abs(Math.cos(card.rotation.y));
     shadow.position.x = -Math.sin(card.rotation.y) * .35;
     shadow.position.y = -.14 - card.position.y * 1.5 + card.rotation.x * .2;
@@ -1287,7 +1288,8 @@ async function recordSpin(v, f) {
     await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
     view.state.spin = {start: performance.now() + 400, duration: 4000};
     recorder.start(250);
-    await new Promise(res => setTimeout(res, 4800));
+    // A still moment at the end too (like the 400 ms at the start): any encoder hiccup on the last frames lands on a still card.
+    await new Promise(res => setTimeout(res, 5300));
     recorder.stop(); await done;
   } finally {
     view.state.spin = null; view.state.rec = null;
