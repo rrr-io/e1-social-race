@@ -328,9 +328,8 @@ const FINISHES = {   // 3D only: the downloaded PNG stays clean
   aurora: {mode: 6, strength: .55},
   prism: {mode: 1, strength: .6},
   gold: {mode: 2, strength: .55},
-  sparkle: {mode: 7, strength: 1.4},
-  cosmos: {mode: 8, strength: .8},
-  rainbow: {mode: 9, strength: .65},
+  sparkle: {mode: 7, strength: .8},
+  cosmos: {mode: 8, strength: .45},
 };
 const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 // The admin certificate has its own finish, so it never looks like a team card.
@@ -1036,13 +1035,6 @@ function createView() {
           }
           float t = vUv.x * .6 + vUv.y * .4 + tilt.x * 2.4 - tilt.y * 1.8;
           col = rainbow(t + ring * .25); a = uStrength * (.14 * (.4 + rim) + ring * .7);
-        } else if (uMode == 9) {   // rainbow rare: a pastel rainbow over the whole card, with glittering diagonal bands
-          float t = vUv.x * .7 - vUv.y * .9 + tilt.x * 1.6 + tilt.y * 1.2;
-          vec3 pastel = mix(rainbow(t), vec3(1.0), .2);
-          float band = smoothstep(.55, 1.0, sin((vUv.x + vUv.y) * 55.0 + tilt.x * 12.0 - tilt.y * 8.0) * .5 + .5);
-          vec2 g = vUv * vec2(180.0, 262.0), c = floor(g);
-          float gl = step(.86, hash(c)) * pow(max(0.0, sin(hash(c + 3.1) * 60.0 + tilt.x * 36.0 + tilt.y * 28.0)), 10.0);
-          col = mix(pastel, vec3(1.0), gl); a = uStrength * (.32 + .3 * band) + gl * .9;
         } else {                   // none: only a soft sheen
           float s = exp(-pow((vUv.x - .5 - tilt.x * 1.5) * 3.0, 2.0)); col = vec3(1.0); a = uStrength * .35 * s;
         }

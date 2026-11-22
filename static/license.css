@@ -99,3 +99,13 @@ body.embed .lic-get:hover{color:#fff}
 .lic-actions .lic-donor-btn{grid-column:1/-1;color:#2a2540;border-color:#fff;background:conic-gradient(from 40deg at 50% 50%,#ffd1f0,#c9e8ff,#d4ffe6,#fff2c4,#e2d4ff,#ffd1f0)}
 .lic-actions .lic-donor-btn[hidden]{display:none}
 .lic-form label[hidden]{display:none}
+
+/* Short title and lighter intro on phones, so the card shows sooner */
+.lic-short{display:none}
+@media(max-width:860px){
+  .lic-long{display:none}
+  .lic-short{display:inline}
+  .lic-intro h1{font-size:30px}
+  .lic-intro .lic-lead{font-size:16px;line-height:1.45;margin-bottom:6px}
+  .lic-intro .lic-how{display:none}
+}
