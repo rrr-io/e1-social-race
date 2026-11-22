@@ -88,7 +88,7 @@ def parse(text):
         handles = x_handles(row.get(cols['x']) or '') if cols['x'] else []
         donor = bool(cols['donor']) and (row.get(cols['donor']) or '').strip().casefold() not in NO
         # No crew licence level (stored as 0): the admins, and creators or donors who did not race.
-        if team == 'staff' or (level is None and not (row.get(cols['level']) or '').strip() and (role in NO_LEVEL_ROLES or donor)):
+        if team == 'staff' or (level is None and not (row.get(cols['level']) or '').strip() and (NO_LEVEL_ROLES & set(re.split(r'\s*(?:;|\||/|\+|&|·)\s*', role)) or donor)):
             level = -1
         if not name.lstrip('@') or team is None or level is None:
             skipped.append(line)

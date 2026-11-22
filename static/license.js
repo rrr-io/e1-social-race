@@ -21,6 +21,8 @@ const TEAMS = {
   staff: {name: 'EMGP Admin', member: '', color: '#9a9ca6'},           // the organisers: own finish, no licence
 };
 const CLASSIC = '#9a9ca6';   // the default (no team) colour, for who prefers it to the team colour
+// More than one role in the list ("Co-Team Captain; Social Media Creator"): the first is the main one.
+const roleList = v => (v.role || '').split(/\s*(?:;|\||\/|\+|&|·)\s*/).filter(Boolean);
 const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
 // Coordinator roles from the E1 glossary: what each one did, shown under the role on the certificate.
 const ROLES = {
@@ -59,7 +61,7 @@ function values() {
   const level = form.elements.level.value === '' ? null : LEVELS[Number(form.elements.level.value)] || null;
   const role = picked?.role || '', donor = Boolean(picked?.donor), staff = form.elements.team.value === 'staff';
   // Creators and donors who did not race: no level, a licence of their own.
-  const special = !staff && picked && !picked.level ? (role === 'Social Media Creator' ? 'creator' : donor ? 'supporter' : null) : null;
+  const special = !staff && picked && !picked.level ? (roleList({role}).includes('Social Media Creator') ? 'creator' : donor ? 'supporter' : null) : null;
   return {username, key: picked?.username || username, team, level, role, donor, staff, special, complete: Boolean(username && team && (level || staff || special) && (!crewLoaded || picked))};
 }
 
@@ -512,25 +514,37 @@ const spacedWidth = (ctx, t, sp) => [...t].reduce((a, ch) => a + ctx.measureText
 // The role title in chrome: top of the 60 px band at y (logical pixels). Returns its width.
 const ROLE_SIZE = 38, ROLE_SP = 5;
 function drawRoleTitle(ctx, x, y, v) {
-  const title = v.role.toUpperCase();
+  const title = roleList(v)[0].toUpperCase();
   let size = ROLE_SIZE; ctx.font = font(size, 700);
   while (spacedWidth(ctx, title, ROLE_SP) > PW - 112 && size > 24) { size -= 2; ctx.font = font(size, 700); }
   ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   ctx.fillStyle = 'rgba(0,0,0,.55)'; spaced(ctx, title, x, y + 47, ROLE_SP);          // soft drop
   ctx.fillStyle = chromeFill(ctx, y + 47 - size * .74, y + 47); spaced(ctx, title, x, y + 45, ROLE_SP);
+  const w = spacedWidth(ctx, title, ROLE_SP), more = roleList(v).slice(1);
+  if (more.length) {
+    // Second role: also in chrome, a step smaller, on its own line ("& SOCIAL MEDIA CREATOR").
+    const second = `& ${more.join(' & ')}`.toUpperCase();
+    let s2 = 30; ctx.font = font(s2, 700);
+    while (spacedWidth(ctx, second, 4) > PW - 112 && s2 > 20) { s2 -= 2; ctx.font = font(s2, 700); }
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; spaced(ctx, second, x, y + 92, 4);
+    ctx.fillStyle = chromeFill(ctx, y + 92 - s2 * .74, y + 92); spaced(ctx, second, x, y + 90, 4);
+  }
   ctx.restore();
-  return spacedWidth(ctx, title, ROLE_SP);
+  return w;
 }
 function drawRoleBlock(ctx, v, y, withTitle) {
   // CREW ROLE ——— (hairline) / TITLE / description: quiet, engraved-certificate style.
-  const c = v.team?.color || '#9a9ca6', desc = (ROLES[v.role] ?? '').toUpperCase();
+  const roles = roleList(v), c = v.team?.color || '#9a9ca6';
+  // Two roles: both in chrome (the second a step smaller), then the description of the main one.
+  const desc = (ROLES[roles[0]] ?? '').toUpperCase();
+  const label = roles.length > 1 ? 'CREW ROLES' : 'CREW ROLE';
   ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-  ctx.fillStyle = c; ctx.font = font(14, 700); spaced(ctx, 'CREW ROLE', 56, y + 12, 4);
+  ctx.fillStyle = c; ctx.font = font(14, 700); spaced(ctx, label, 56, y + 12, 4);
   const end = v.donor ? STICKER.x - STICKER.r - 40 : PW - 56;   // keep clear of the supporter sticker
-  const lx = 56 + spacedWidth(ctx, 'CREW ROLE', 4) + 16, line = ctx.createLinearGradient(lx, 0, end, 0);
+  const lx = 56 + spacedWidth(ctx, label, 4) + 16, line = ctx.createLinearGradient(lx, 0, end, 0);
   line.addColorStop(0, 'rgba(230,233,238,.55)'); line.addColorStop(1, 'rgba(230,233,238,0)');
   ctx.fillStyle = line; ctx.fillRect(lx, y + 7, end - lx, 1.2);
-  if (desc) { ctx.fillStyle = '#a9adb6'; ctx.font = font(14, 600); spaced(ctx, desc, 56, y + 92, 3); }
+  if (desc) { ctx.fillStyle = '#a9adb6'; ctx.font = font(14, 600); spaced(ctx, desc, 56, y + (roles.length > 1 ? 136 : 92), 3); }
   ctx.restore();
   if (withTitle) {
     const w = drawRoleTitle(ctx, 54, y + 18, v);
@@ -720,7 +734,7 @@ const front = document.createElement('canvas'); front.width = PW * PSCALE; front
 const back = document.createElement('canvas'); back.width = PW * PSCALE; back.height = PH * PSCALE;
 const frontBase = document.createElement('canvas'); frontBase.width = front.width; frontBase.height = front.height;
 // The role plate of the coordinators, drawn on its own for the 3D metal plate.
-const ROLE_W = PW - 112, ROLE_H = 60;
+const ROLE_W = PW - 112, ROLE_H = 104;   // room for a second role
 const STICK = 2 * STICKER.r + 8;
 const stickerCanvas = document.createElement('canvas'); stickerCanvas.width = stickerCanvas.height = STICK * PSCALE;
 const stickerRelief = document.createElement('canvas'); stickerRelief.width = stickerRelief.height = STICK * PSCALE;
