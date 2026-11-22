@@ -142,7 +142,7 @@ function drawPlaceholder(ctx) {
 }
 
 // Admin pass: what the organisers carry in the sleeve instead of a crew licence (same size).
-// Neutral on purpose (no team colours): graphite, an E1 in bas-relief and a barcode.
+// Neutral on purpose (no team colours): graphite, a subtle E1 in bas-relief and the pass number.
 const ADMIN_LOGO = {x: 1170, y: 250, h: 300};
 function logoMask(img, w, h, colour) {
   const c = document.createElement('canvas'); c.width = Math.ceil(w); c.height = Math.ceil(h);
@@ -159,9 +159,9 @@ function drawStaffPass(ctx, v) {
   // E1 in bas-relief: same material as the card, raised edges catching the light.
   if (logo.complete && logo.naturalWidth) {
     const {x, y, h} = ADMIN_LOGO, w = h * logo.naturalWidth / logo.naturalHeight, lx = x - w / 2;
-    ctx.drawImage(logoMask(logo, w, h, 'rgba(0,0,0,.6)'), lx + 5, y + 6);
-    ctx.drawImage(logoMask(logo, w, h, 'rgba(255,255,255,.16)'), lx - 3, y - 3);
-    const face = ctx.createLinearGradient(lx, y, lx + w, y + h); face.addColorStop(0, '#2c2f36'); face.addColorStop(1, '#1a1c21');
+    ctx.drawImage(logoMask(logo, w, h, 'rgba(0,0,0,.2)'), lx + 2, y + 3);
+    ctx.drawImage(logoMask(logo, w, h, 'rgba(255,255,255,.045)'), lx - 1.5, y - 1.5);
+    const face = ctx.createLinearGradient(lx, y, lx + w, y + h); face.addColorStop(0, '#24272d'); face.addColorStop(1, '#16181c');
     ctx.drawImage(logoMask(logo, w, h, face), lx, y);
   }
   // Header and holder, in the type of the crew licences.
@@ -171,13 +171,10 @@ function drawStaffPass(ctx, v) {
   ctx.fillStyle = '#fff'; ctx.font = font(60, 700); ctx.textAlign = 'right'; ctx.fillText('ADMIN PASS', CW - 88, 140); ctx.textAlign = 'left';
   const name = v.username || 'Your Name';
   ctx.fillStyle = '#fff'; fit(ctx, name, 760, 81, 700); ctx.fillText(name, 88, 350);
-  ctx.fillStyle = '#c0c4cd'; ctx.font = font(40, 600); ctx.fillText('EMGP Organizing Team', 89, 418);
+  ctx.fillStyle = '#c0c4cd'; ctx.font = font(40, 600); ctx.fillText('EMGP Admin Team', 89, 418);
   ctx.fillStyle = '#eef0f4'; fit(ctx, (v.role || 'Admin').toUpperCase(), 820, 66, 700); ctx.fillText((v.role || 'Admin').toUpperCase(), 86, 540);
-  // Barcode and pass number.
-  let bx = 88; seed = [...(v.key || 'x')].reduce((a, ch) => a + ch.codePointAt(0), 99);
-  ctx.fillStyle = 'rgba(255,255,255,.7)';
-  while (bx < 360) { const w = 2 + Math.floor(rnd() * 3); ctx.fillRect(bx, 640, w, 46); bx += w + 2 + Math.floor(rnd() * 4); }
-  ctx.fillStyle = '#8d8f99'; ctx.font = font(22, 700); spaced(ctx, `${licenceNumber(v)} · ADMIN · 2026`, 88, 718, 4);
+  // Pass number.
+  ctx.fillStyle = '#8d8f99'; ctx.font = font(22, 700); spaced(ctx, `${licenceNumber(v)} · ADMIN · 2026`, 88, 700, 4);
   ctx.restore();
 }
 // The same E1, as a height map, for the raised logo of the 3D admin pass.
@@ -222,11 +219,31 @@ const FINISHES = {   // 3D only: the downloaded PNG stays clean
   gold: {mode: 2, strength: .55},
 };
 const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
-function passBase(ctx, c) {
+// The admin certificate has its own finish, so it never looks like a team card.
+const ADMIN_LOOKS = {
+  graphite: {accent: '#9a9ca6', base: ['#1c1e24', '#0d0e11']},
+  carbon: {accent: '#d9dce3', base: ['#16171b', '#050506'], weave: true},
+  champagne: {accent: '#cdb98f', base: ['#1f1c17', '#0c0b09']},
+};
+let ADMIN_LOOK = 'carbon';
+const adminLook = () => ADMIN_LOOKS[window.__adminLook] || ADMIN_LOOKS[ADMIN_LOOK];
+function carbonWeave(ctx) {
+  // Carbon fibre twill: 2x2 woven tows, each with a soft sheen.
+  const t = document.createElement('canvas'); t.width = t.height = 24; const g = t.getContext('2d');
+  for (const [x, y, horiz] of [[0, 0, true], [12, 0, false], [0, 12, false], [12, 12, true]]) {
+    const gr = horiz ? g.createLinearGradient(0, y, 0, y + 12) : g.createLinearGradient(x, 0, x + 12, 0);
+    gr.addColorStop(0, 'rgba(255,255,255,.015)'); gr.addColorStop(.5, 'rgba(255,255,255,.075)'); gr.addColorStop(1, 'rgba(0,0,0,.25)');
+    g.fillStyle = gr; g.fillRect(x, y, 12, 12);
+  }
+  ctx.save(); ctx.rotate(Math.PI / 4); ctx.fillStyle = ctx.createPattern(t, 'repeat'); ctx.fillRect(-PH, -PH, PH * 3, PH * 3); ctx.restore();
+}
+function passBase(ctx, c, v) {
   roundRect(ctx, 0, 0, PW, PH, PRADIUS); ctx.clip();
+  const look = v?.staff ? adminLook() : null, [b0, b1] = look ? look.base : ['#1c1e24', '#0d0e11'];
   let g = ctx.createLinearGradient(0, 0, PW * .6, PH);
-  g.addColorStop(0, '#1c1e24'); g.addColorStop(.6, '#0d0e11'); g.addColorStop(1, '#0d0e11');
+  g.addColorStop(0, b0); g.addColorStop(.6, b1); g.addColorStop(1, b1);
   ctx.fillStyle = g; ctx.fillRect(0, 0, PW, PH);
+  if (look?.weave) carbonWeave(ctx);
   for (const [x, y, r, a] of [[PW * .9, 0, 900, .6], [0, PH, 700, .32]]) {
     g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, hexA(c, a)); g.addColorStop(1, hexA(c, 0));
@@ -313,8 +330,8 @@ function wrapText(ctx, parts, x, y, maxWidth, lineHeight) {
   return y;
 }
 function drawPassFront(ctx, v, withLicence = true) {
-  const c = v.team?.color || '#9a9ca6';
-  ctx.save(); passBase(ctx, c);
+  const c = v.staff ? adminLook().accent : v.team?.color || '#9a9ca6';
+  ctx.save(); passBase(ctx, c, v);
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = c; ctx.fillRect(56, 98, 44, 6);
   ctx.fillStyle = '#d4d5db'; ctx.font = font(22, 700); spaced(ctx, 'ENHYPEN MAMA GRAND PRIX', 116, 108, 4);
@@ -559,8 +576,8 @@ function trophy(ctx, x, y, s, color) {
   ctx.fillRect(13, 40, 22, 3); ctx.restore();
 }
 function drawPassBack(ctx, v) {
-  const c = v.team?.color || '#9a9ca6';
-  ctx.save(); passBase(ctx, c);
+  const c = v.staff ? adminLook().accent : v.team?.color || '#9a9ca6';
+  ctx.save(); passBase(ctx, c, v);
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   if (logo.complete && logo.naturalWidth) { const h = 110, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, (PW - w) / 2, 106, w, h); }
   ctx.fillStyle = '#fff'; ctx.font = font(74, 700); ctx.fillText('ENHYPEN', PW / 2, 312); ctx.fillText('MAMA GRAND PRIX', PW / 2, 384);
@@ -937,7 +954,7 @@ function createView() {
       frontTex.needsUpdate = true; backTex.needsUpdate = true; licTex.needsUpdate = true; frontBump.needsUpdate = true; backBump.needsUpdate = true;
       // Admin pass: the E1 is raised in 3D too.
       const lm = licMesh.material, bump = v.staff ? licBump : null;
-      if (lm.normalMap !== bump) { lm.normalMap = bump; lm.normalScale.set(3, 3); lm.needsUpdate = true; }
+      if (lm.normalMap !== bump) { lm.normalMap = bump; lm.normalScale.set(.9, .9); lm.needsUpdate = true; }
       if (bump) licBump.needsUpdate = true;
       rolePlate.visible = Boolean(v.role && roleSlot);
       if (rolePlate.visible) {
@@ -1051,7 +1068,7 @@ function videoBackground(v, f) {
     label('ENHYPEN MAMA GRAND PRIX 2026', 350, 30, 700, '#d4d5db', 5);
     label('CERTIFICATE OF PARTICIPATION', 394, 24, 600, '#9a9ca6', 6);
     label(v.username, 1532, 60, 700, '#fff');
-    label(v.staff ? `EMGP Organizing Team · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1584, 30, 600, col);
+    label(v.staff ? `EMGP Admin Team · ${v.role}` : `${teamLabel(v.team, ' · ')} · ${v.level.name}`, 1584, 30, 600, col);
     label('Different Colors. Same finish line.', 1636, 26, 400, '#c9cad0');
   } else if (f === FORMATS.square) {
     label(who, h - 64, 30, 700, '#fff');
