@@ -141,9 +141,18 @@ def search(query):
     rows = entries()
     if not q:
         return {'loaded': bool(rows), 'results': []}
-    hits = [(0 if e['_fold'] == q else 1 if e['_fold'].startswith(q) else 2, e) for e in rows if q in e['_fold']]
+    # The E1 username or one of the X handles: exact, then starts with, then contains.
+    rank = lambda text: 0 if text == q else 1 if text.startswith(q) else 2 if q in text else 3
+    hits = []
+    for e in rows:
+        own = rank(e['_fold'])
+        via = min(((rank(h.casefold()), h) for h in e['x']), default=(3, ''))
+        best = min(own, via[0])
+        if best < 3:
+            hits.append((best, e, via[1] if via[0] < own else ''))
     hits.sort(key=lambda h: h[0])  # stable: alphabetical inside each group
-    return {'loaded': True, 'results': [public(e) for _, e in hits[:LIMIT]]}
+    # A match on the handle says which one (only the handle that was typed, not the others).
+    return {'loaded': True, 'results': [{**public(e), **({'via': via} if via else {})} for _, e, via in hits[:LIMIT]]}
 
 
 def get(entry_id):

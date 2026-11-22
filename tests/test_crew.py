@@ -101,6 +101,9 @@ class Crew(unittest.TestCase):
         self.assertNotIn('x', found)  # handles only with the single entry
         # X handles from the links: no typo-short handle, no project account.
         self.assertEqual(self.call(f'/api/crew?id={found["id"]}', auth=False)[1]['x'], ['Jaybird_X'])
+        # The search also finds the X handle, and says which one matched.
+        via = self.call('/api/crew?q=%40jaybird_x', auth=False)[1]['results']
+        self.assertEqual([(e['username'], e.get('via')) for e in via], [('Jaybird', 'Jaybird_X')])
         self.assertEqual(self.call('/api/crew', 'username,team,level\nx,Nowhere,All-Star\n')[0], 400)
         self.assertEqual(self.call('/api/crew?q=nini', auth=False)[1]['results'][0]['team'], 'rikston')  # old list kept
         # Italian spreadsheets: semicolons.

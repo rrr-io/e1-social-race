@@ -1279,13 +1279,13 @@ function showSuggest(list, query) {
   results = list; active = -1; suggest.replaceChildren();
   if (!list.length) {
     const li = document.createElement('li'); li.className = 'empty';
-    li.textContent = query ? 'No crew member with this name. Check the spelling of your E1 username.' : '';
+    li.textContent = query ? 'No crew member with this name. Check the spelling of your E1 username or X handle.' : '';
     suggest.append(li);
   }
   list.forEach((e, i) => {
     const li = document.createElement('li'); li.id = `lic-opt-${i}`; li.setAttribute('role', 'option'); li.dataset.index = i;
     const name = document.createElement('b'); name.textContent = e.username;
-    const meta = document.createElement('small'); meta.textContent = entryNote(e).trim();
+    const meta = document.createElement('small'); meta.textContent = [e.via ? `@${e.via}` : '', entryNote(e).trim()].filter(Boolean).join(' ');
     li.style.setProperty('--team', TEAMS[e.team].color); li.append(name, meta);
     suggest.append(li);
   });

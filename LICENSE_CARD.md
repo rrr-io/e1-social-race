@@ -32,7 +32,7 @@ A public page where a crew member types their **E1 username**, picks it from the
   curl -u admin:PASSWORD -H 'Content-Type: text/csv' --data-binary @emgp26-crew.csv https://emgp26-certificates.enhypenvoting.com/api/crew
   ```
 
-- `GET /api/crew?q=…` (up to 8 matches: exact, then starts with, then contains; a leading @ is ignored), `GET /api/crew?id=…` (one entry; the embed code uses it, so name, team, level and role cannot be changed in the link).
+- `GET /api/crew?q=…` (up to 8 matches on the E1 username or an X handle: exact, then starts with, then contains; a leading @ is ignored; a match on a handle comes back as `via`), `GET /api/crew?id=…` (one entry; the embed code uses it, so name, team, level and role cannot be changed in the link).
 - Without a list the page falls back to choosing team and level by hand.
 
 ## Own subdomain
