@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr t
 ARG YTDLP_REFRESH=0
 RUN echo "yt-dlp refresh: ${YTDLP_REFRESH}" && pip install --no-cache-dir --upgrade -r requirements.txt && useradd --create-home --uid 10001 pulse
 # Explicit copies ensure server-side .env and cookies never enter the image.
-COPY --chown=pulse:pulse app.py collectors.py storage.py race.py collab.py ./
+COPY --chown=pulse:pulse app.py collectors.py storage.py race.py collab.py crew.py ./
 COPY --chown=pulse:pulse static/ ./static/
 COPY --chown=pulse:pulse deploy/healthcheck.py ./deploy/healthcheck.py
 RUN mkdir -p /app/data && chown pulse:pulse /app/data
