@@ -26,7 +26,7 @@ TEAMS = {  # key: (scuderia, member team)
     'alpinoo': ('Alpinoo', 'Team SUNOO'), 'meowcedes': ('Meowcedes', 'Team JUNGWON'), 'rikston': ('Rikston Drift', 'Team NI-KI'),
     'independent': ('Independent Crew', 'Independent Crew'),
     # The organisers: no team and no crew licence level, a staff certificate instead.
-    'staff': ('EMGP Staff', 'Staff', 'Admin', 'Organising Team'),
+    'staff': ('EMGP Admin', 'EMGP Staff', 'Admin', 'Staff', 'Organising Team'),
 }
 TEAM_KEYS = {n.casefold(): k for k, names in TEAMS.items() for n in (k, *names)}
 LEVELS = ['Paddock Rookie', 'Race Ready', 'Fast Lane', 'Pit Lane Pro', 'Redline Ace', 'Paddock Icon', 'Circuit Storm', 'E1 Elite',

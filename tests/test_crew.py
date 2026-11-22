@@ -21,7 +21,7 @@ lily,Meowcedes,All-Star,
 racerriki,Rikston Drift,All-Star,
 racerriki,Rikston Drift,Hall of Fame,
 @elle,Alpinoo,E1 Immortal,
-rio,Staff,,Circuit Operations,
+rio,EMGP Admin,,Circuit Operations,
 Rio,McJakey,All-Star,
 ghost,Nowhere,All-Star,
 '''
@@ -90,7 +90,7 @@ class Crew(unittest.TestCase):
         self.assertEqual(self.call('/api/crew?id=nope', auth=False)[0], 404)
         # Staff: no team, no level; the same name as a crew member shows "EMGP Staff".
         rio = {e['team']: e for e in self.call('/api/crew?q=rio', auth=False)[1]['results']}
-        self.assertEqual((rio['staff']['level'], rio['staff']['role'], rio['staff']['note']), (0, 'Circuit Operations', 'EMGP Staff'))
+        self.assertEqual((rio['staff']['level'], rio['staff']['role'], rio['staff']['note']), (0, 'Circuit Operations', 'EMGP Admin'))
         self.assertEqual(rio['mcjakey']['note'], 'McJakey')
 
     def test_export_format_and_bad_files(self):

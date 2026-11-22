@@ -18,7 +18,7 @@ const TEAMS = {
   meowcedes: {name: 'Meowcedes', member: 'Team Jungwon', color: '#2ee6c5'},
   rikston: {name: 'Rikston Drift', member: 'Team Ni-ki', color: '#13804f'},   // bottle green
   independent: {name: 'Independent Crew', member: '', color: '#3b82f6'},
-  staff: {name: 'EMGP Staff', member: '', color: '#9a9ca6'},           // the organisers: default colour, no licence
+  staff: {name: 'EMGP Admin', member: '', color: '#9a9ca6'},           // the organisers: own finish, no licence
 };
 const CLASSIC = '#9a9ca6';   // the default (no team) colour, for who prefers it to the team colour
 const teamLabel = (team, sep) => team.member ? `${team.name}${sep}${team.member}` : team.name;
@@ -142,45 +142,105 @@ function drawPlaceholder(ctx) {
 }
 
 // Admin pass: what the organisers carry in the sleeve instead of a crew licence (same size).
-// Neutral on purpose (no team colours): graphite, a subtle E1 in bas-relief and the pass number.
-const ADMIN_LOGO = {x: 1170, y: 250, h: 300};
-function logoMask(img, w, h, colour) {
-  const c = document.createElement('canvas'); c.width = Math.ceil(w); c.height = Math.ceil(h);
-  const g = c.getContext('2d'); g.drawImage(img, 0, 0, c.width, c.height);
-  g.globalCompositeOperation = 'source-in'; g.fillStyle = colour; g.fillRect(0, 0, c.width, c.height);
-  return c;
+// Inspired by paddock credentials: matte black, a coloured frame and corner tab (red for Race Control,
+// white for the other admins: never a team colour), an art-deco double line over a chevron parquet,
+// a holographic serial sticker and the role in large type.
+const adminFrame = v => v.role === 'Race Control' ? {c: '#e10600', ink: '#fff'} : {c: '#eef0f4', ink: '#111214'};
+const DECO = [[0, 640], [840, 640], [990, 790], [CW, 790]];
+const AB = 18, TAB = {w: 128, y: 470, r: 26};   // frame width; side tab (one raised piece with the frame)
+function decoLine(ctx, dy) { ctx.beginPath(); DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + dy) : ctx.moveTo(x, y + dy)); }
+function panelPath(ctx) {
+  // The recessed black panel: inside the frame, minus the side tab (bevelled corner where they meet).
+  const x0 = AB, y0 = AB, x1 = CW - AB, y1 = CH - AB, r = RADIUS - AB, tx = x1 - TAB.w;
+  ctx.beginPath(); ctx.moveTo(x0 + r, y0); ctx.lineTo(x1 - r, y0); ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
+  ctx.lineTo(x1, TAB.y); ctx.lineTo(tx + TAB.r, TAB.y); ctx.lineTo(tx, TAB.y + TAB.r);   // bevelled corner
+  ctx.lineTo(tx, y1); ctx.lineTo(x0 + r, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
+  ctx.lineTo(x0, y0 + r); ctx.quadraticCurveTo(x0, y0, x0 + r, y0); ctx.closePath();
 }
-function drawStaffPass(ctx, v) {
-  ctx.save(); roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
-  const g = ctx.createLinearGradient(0, 0, CW, CH); g.addColorStop(0, '#2a2d34'); g.addColorStop(1, '#0e0f12');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
-  let seed = 7; const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
-  for (let i = 0; i < 260; i++) { ctx.fillStyle = rnd() < .5 ? `rgba(255,255,255,${.015 + rnd() * .03})` : `rgba(0,0,0,${.05 + rnd() * .08})`; ctx.fillRect(0, rnd() * CH, CW, 1); }
-  // E1 in bas-relief: same material as the card, raised edges catching the light.
-  if (logo.complete && logo.naturalWidth) {
-    const {x, y, h} = ADMIN_LOGO, w = h * logo.naturalWidth / logo.naturalHeight, lx = x - w / 2;
-    ctx.drawImage(logoMask(logo, w, h, 'rgba(0,0,0,.2)'), lx + 2, y + 3);
-    ctx.drawImage(logoMask(logo, w, h, 'rgba(255,255,255,.045)'), lx - 1.5, y - 1.5);
-    const face = ctx.createLinearGradient(lx, y, lx + w, y + h); face.addColorStop(0, '#24272d'); face.addColorStop(1, '#16181c');
-    ctx.drawImage(logoMask(logo, w, h, face), lx, y);
+function parquet(ctx, colour) {
+  // Chevron parquet below the deco line.
+  ctx.save(); ctx.beginPath(); DECO.forEach(([x, y], i) => i ? ctx.lineTo(x, y + 26) : ctx.moveTo(x, y + 26)); ctx.lineTo(CW, CH); ctx.lineTo(0, CH); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle = colour; ctx.lineWidth = 2.2;
+  const W = 58, H = 44;
+  for (let c = 0; c * W < CW; c++) {
+    const x0 = c * W;
+    ctx.beginPath(); ctx.moveTo(x0, 600); ctx.lineTo(x0, CH); ctx.stroke();
+    for (let y = 560 + (c % 2) * H / 2; y < CH + W; y += H) {
+      ctx.beginPath();
+      if (c % 2) { ctx.moveTo(x0, y + W); ctx.lineTo(x0 + W, y); } else { ctx.moveTo(x0, y); ctx.lineTo(x0 + W, y + W); }
+      ctx.stroke();
+    }
   }
-  // Header and holder, in the type of the crew licences.
-  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-  ctx.fillStyle = RED; ctx.fillRect(88, 112, 40, 6);
-  ctx.fillStyle = '#d4d5db'; ctx.font = font(24, 700); spaced(ctx, 'ENHYPEN MAMA GRAND PRIX', 146, 122, 4);
-  ctx.fillStyle = '#fff'; ctx.font = font(60, 700); ctx.textAlign = 'right'; ctx.fillText('ADMIN PASS', CW - 88, 140); ctx.textAlign = 'left';
-  const name = v.username || 'Your Name';
-  ctx.fillStyle = '#fff'; fit(ctx, name, 760, 81, 700); ctx.fillText(name, 88, 350);
-  ctx.fillStyle = '#c0c4cd'; ctx.font = font(40, 600); ctx.fillText('EMGP Admin Team', 89, 418);
-  ctx.fillStyle = '#eef0f4'; fit(ctx, (v.role || 'Admin').toUpperCase(), 820, 66, 700); ctx.fillText((v.role || 'Admin').toUpperCase(), 86, 540);
-  // Pass number.
-  ctx.fillStyle = '#8d8f99'; ctx.font = font(22, 700); spaced(ctx, `${licenceNumber(v)} · ADMIN · 2026`, 88, 700, 4);
   ctx.restore();
 }
-// The same E1, as a height map, for the raised logo of the 3D admin pass.
-function drawStaffRelief(ctx) {
-  ctx.fillStyle = '#7a7a7a'; ctx.fillRect(0, 0, CW, CH);
-  if (logo.complete && logo.naturalWidth) { const {x, y, h} = ADMIN_LOGO, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logoMask(logo, w, h, '#fff'), x - w / 2, y); }
+function adminRole(ctx, v) {
+  const words = (v.role || 'Admin').toUpperCase().split(' '), lines = words.length > 1 ? [words.slice(0, -1).join(' '), words.at(-1)] : words;
+  let size = 96; ctx.font = font(size, 700);
+  while (Math.max(...lines.map(l => ctx.measureText(l).width)) > 1000 && size > 64) { size -= 4; ctx.font = font(size, 700); }
+  return {lines, size};
+}
+function drawStaffPass(ctx, v) {
+  const f = adminFrame(v);
+  ctx.save(); roundRect(ctx, 0, 0, CW, CH, RADIUS); ctx.clip();
+  // Frame and tab: one raised piece, lit from the top left.
+  ctx.fillStyle = f.c; ctx.fillRect(0, 0, CW, CH);
+  const lit = ctx.createLinearGradient(0, 0, CW, CH); lit.addColorStop(0, 'rgba(255,255,255,.28)'); lit.addColorStop(.5, 'rgba(255,255,255,0)'); lit.addColorStop(1, 'rgba(0,0,0,.28)');
+  ctx.fillStyle = lit; ctx.fillRect(0, 0, CW, CH);
+  // Panel, recessed: dark fill, then an inner shadow along its edge and a light lip on the frame.
+  ctx.save(); ctx.translate(-1.5, -1.5); panelPath(ctx); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.stroke(); ctx.restore();
+  ctx.save(); panelPath(ctx); ctx.clip();
+  const g = ctx.createLinearGradient(0, 0, CW, CH); g.addColorStop(0, '#17181c'); g.addColorStop(1, '#08090a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
+  parquet(ctx, 'rgba(220,224,232,.16)');
+  ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(230,233,238,.75)'; decoLine(ctx, 0); ctx.stroke(); decoLine(ctx, 14); ctx.stroke();
+  ctx.shadowColor = 'rgba(0,0,0,.9)'; ctx.shadowBlur = 22; ctx.shadowOffsetX = 5; ctx.shadowOffsetY = 6;
+  panelPath(ctx); ctx.lineWidth = 16; ctx.strokeStyle = '#000'; ctx.stroke();
+  ctx.restore();
+  // Header: E1 and the event.
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  if (logo.complete && logo.naturalWidth) { const h = 92, w = h * logo.naturalWidth / logo.naturalHeight; ctx.drawImage(logo, 82, 66, w, h); }
+  ctx.fillStyle = '#c9ccd3'; ctx.font = font(22, 700); spaced(ctx, 'ENHYPEN MAMA GRAND PRIX 2026', 84, 200, 5);
+  // Holographic serial sticker.
+  const sw = 330, sh = 100, sx = CW - AB - 60 - sw, sy = 62;
+  const holo = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
+  ['#d9dce3', '#f3e6ff', '#d8f3ff', '#fff6d6', '#e6e8ee', '#ffe0ef', '#d9dce3'].forEach((col, i, a) => holo.addColorStop(i / (a.length - 1), col));
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3; roundRect(ctx, sx, sy, sw, sh, 10); ctx.fillStyle = holo; ctx.fill(); ctx.restore();
+  let seed = 3; const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < 240; i++) { ctx.fillStyle = `rgba(255,255,255,${.4 + rnd() * .6})`; ctx.fillRect(sx + rnd() * sw, sy + rnd() * sh, 1.3, 1.3); }
+  ctx.fillStyle = '#3a3550'; ctx.font = font(19, 700); spaced(ctx, 'ADMIN PASS', sx + 24, sy + 38, 4);
+  ctx.font = font(32, 700); spaced(ctx, licenceNumber(v), sx + 24, sy + 80, 3);
+  // Role on two lines in polished chrome, with glints; then the holder's name, large.
+  const {lines, size} = adminRole(ctx, v);
+  lines.forEach((l, i) => {
+    const y = 316 + i * size * .95;
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(l, 80, y + 4);
+    ctx.fillStyle = chromeFill(ctx, y - size * .74, y); ctx.fillText(l, 78, y);
+  });
+  ctx.save();
+  const w0 = ctx.measureText(lines[0]).width, w1 = ctx.measureText(lines.at(-1)).width;
+  sparkle(ctx, 78 + w0 - 10, 316 - size * .66, 30); sparkle(ctx, 78 + w1 * .32, 316 + (lines.length - 1) * size * .95 - size * .7, 18, .85);
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  const name = v.username || 'Your Name';
+  ctx.fillStyle = '#fff'; fit(ctx, name, 760, 92, 700); ctx.fillText(name, 80, 534);
+  ctx.fillStyle = '#9da1ab'; ctx.font = font(24, 600); spaced(ctx, 'EMGP ADMIN TEAM', 86, 578, 4);
+  // ADMIN on the tab.
+  ctx.save(); ctx.translate(CW - AB - TAB.w / 2 + 22, CH - 74); ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.font = `italic ${font(72, 700)}`; ctx.fillText('ADMIN', 2, 3);
+  ctx.fillStyle = f.ink; ctx.fillText('ADMIN', 0, 0);
+  ctx.restore();
+  ctx.restore();
+}
+// Height map for the 3D admin pass: frame and tab raised, panel lower, engraved lines.
+function drawStaffRelief(ctx, v) {
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, CW, CH);
+  panelPath(ctx); ctx.fillStyle = '#7a7a7a'; ctx.fill();
+  ctx.save(); panelPath(ctx); ctx.clip();
+  parquet(ctx, '#d0d0d0'); ctx.lineWidth = 3; ctx.strokeStyle = '#d0d0d0'; decoLine(ctx, 0); ctx.stroke(); decoLine(ctx, 14); ctx.stroke();
+  // The role, raised, so the chrome letters catch the light in 3D.
+  const {lines, size} = adminRole(ctx, v); ctx.fillStyle = '#fff'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  lines.forEach((l, i) => ctx.fillText(l, 78, 316 + i * size * .95));
+  ctx.restore();
 }
 function drawLicence(ctx, v, art) {
   if (v.staff) return drawStaffPass(ctx, v);
@@ -692,7 +752,7 @@ async function paint() {
   }
   if (view?.renderer) {
     heightFrom(frontBase, frontHeight); heightFrom(back, backHeight); if (v.role) heightFrom(roleCanvas, roleHeight);
-    if (v.staff) { const rc = staffRelief.getContext('2d'); rc.setTransform(.5, 0, 0, .5, 0, 0); drawStaffRelief(rc); heightFrom(staffRelief, licHeight); }
+    if (v.staff) { const rc = staffRelief.getContext('2d'); rc.setTransform(.5, 0, 0, .5, 0, 0); drawStaffRelief(rc, v); heightFrom(staffRelief, licHeight); }
   }
   view?.update(v);
 }
