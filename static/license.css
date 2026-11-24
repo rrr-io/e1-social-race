@@ -109,3 +109,4 @@ body.embed .lic-get:hover{color:#fff}
   .lic-intro .lic-lead{font-size:16px;line-height:1.45;margin-bottom:6px}
   .lic-intro .lic-how{display:none}
 }
+.lic-actions #lic-download small{font-weight:600;opacity:.75;margin-left:4px}

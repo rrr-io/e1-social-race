@@ -1128,6 +1128,10 @@ function createView() {
     shadow.position.y = -.14 - card.position.y * 1.5 + card.rotation.x * .2;
     shadow.scale.set(.35 + .65 * turn, 1, 1);
     shadow.material.opacity = .55 + .45 * turn;
+    // In the video, a grey veil swept over the glossy face for a few frames as the card came back to the front
+    // (the lamp and the top softbox reflected on the laminate): softer, fixed lighting while recording.
+    scene.environmentIntensity = state.rec ? .6 : 1;
+    glint.intensity = state.rec ? 1.2 : 5;
     scene.background = state.rec?.background || null;
     renderer.render(scene, state.rec?.camera || camera);
     requestAnimationFrame(frame);
@@ -1191,13 +1195,24 @@ function download(blob, name) {
   const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
-$('lic-download').addEventListener('click', () => {
+// Certificate: front and back as two separate PNGs (no zip: some phones cannot open one).
+const pngOf = canvas => new Promise(res => canvas.toBlob(res, 'image/png'));
+const isPhone = matchMedia('(pointer: coarse)').matches;
+$('lic-download').addEventListener('click', async () => {
   const v = ready(); if (!v) return;
-  front.toBlob(blob => {
-    if (!blob) { toast('error', 'Could not create the image', 'Try again, or use another browser.'); return; }
-    download(blob, `emgp26-certificate-${slug(v)}.png`);
-    toast('success', 'Certificate saved', 'Find it in your downloads or Photos.');
-  }, 'image/png');
+  const [fb, bb] = await Promise.all([pngOf(front), pngOf(back)]);
+  if (!fb || !bb) { toast('error', 'Could not create the images', 'Try again, or use another browser.'); return; }
+  const files = [new File([fb], `emgp26-certificate-${slug(v)}-front.png`, {type: 'image/png'}),
+                 new File([bb], `emgp26-certificate-${slug(v)}-back.png`, {type: 'image/png'})];
+  // Phones: the share sheet saves both at once ("Save 2 images" to Photos / Gallery).
+  if (isPhone && navigator.canShare?.({files})) {
+    try { await navigator.share({files}); return; }
+    catch (e) { if (e.name === 'AbortError') return; /* not allowed: fall back to downloads */ }
+  }
+  // Desktop (or no share sheet): two downloads, one after the other.
+  download(fb, files[0].name);
+  setTimeout(() => download(bb, files[1].name), 700);
+  toast('success', 'Certificate saved', 'Front and back are two images in your downloads.');
 });
 $('lic-licence').addEventListener('click', () => {
   const v = ready(); if (!v) return;
